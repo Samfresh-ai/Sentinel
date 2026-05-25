@@ -227,15 +227,15 @@ Live Sentinel proof:
 ```text
 PASSED splunk:setup-check - REST, KV Store, and HEC are reachable
 PASSED splunk:seed - inserted 20 incidents, 5 services, 5 service runtime configs, 8 runbooks, 5 patterns, and 5 HEC post-mortem events
-PASSED splunk:verify - KV Store counts and SPL post-mortem search passed
+PASSED splunk:verify - seeded KV Store documents and SPL post-mortem search passed
 PASSED sentinel:test-tools - all 6 Sentinel tools returned valid non-empty results
 PASSED sentinel:smoke-test - status=resolved, tools=search_similar_incidents, query_splunk_logs, get_service_dependency_graph, get_runbook, execute_remediation, write_postmortem
-PASSED sentinel:e2e - incident=1480e3011b278a91ed1245bb, postmortemId=3d3009a4e09c984dd343c8cb, indexedPostmortems=8
+PASSED sentinel:e2e - incident=1e353a3573b5e5a4f2f19254, postmortemId=afb40a7cb8c4a12f1443cdbc, indexedPostmortems=12
 ```
 
-See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands. Current known Sentinel gaps: Splunk Hosted Models are not proven on this local license, SPL keyword similarity is lower quality than Atlas Vector Search, and the official Splunk MCP npm package was unavailable so the repo uses a custom REST adapter.
+See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands. Current known Sentinel gaps: Splunk Hosted Models are not callable on this local Splunk Enterprise container because the SCS token endpoint is absent, SPL keyword similarity is lower quality than Atlas Vector Search, and the official Splunk MCP npm package was unavailable so the repo uses a custom REST adapter.
 
-Hosted Models follow-up, 2026-05-25: the blocker is now more specific than "Developer License unproven." Official Splunk docs route Hosted Models through AI Toolkit 5.7.x and the `ai` SPL command. Local re-probe added `pnpm splunk:hosted-models-check`; current run fails at `connect ECONNREFUSED 127.0.0.1:8089` because Docker/Splunk is down. Splunkbase download probes for AI Toolkit 5.7.4 and PSC 4.3.2 returned HTTP 401 and the browser page shows `Log in to Download`. After authenticated install, the next check is whether the account exposes `list_tokens_scs` and the Splunk Hosted Models provider.
+Hosted Models follow-up, 2026-05-25: the blocker is now specific. Official Splunk docs route Hosted Models through AI Toolkit 5.7.x and the `ai` SPL command. AI Toolkit 5.7.4 and PSC 4.3.2 were downloaded through the logged-in Splunkbase browser session and installed into `sentinel-splunk`; `pnpm splunk:setup-check` passes and `pnpm splunk:hosted-models-check` proves AI Toolkit, PSC, and `ai` are present. The remaining blocker is Splunk Cloud Services integration: local Splunk Enterprise returns `404 Not Found` for `/services/authorization/scs_tokens?principalId=slim&scope=tenant`, and `| ai ... provider="Splunk Hosted Models"` fails because no Hosted Models configuration exists. Free-model generation is still usable through the OpenAI-compatible/NVIDIA path; the postmortem generator now normalizes object-shaped model arrays back to the string arrays required by the tool contract.
 
 ## Final Status
 

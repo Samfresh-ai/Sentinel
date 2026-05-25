@@ -148,7 +148,19 @@ Required before claiming the Hosted Models prize lane:
 pnpm splunk:hosted-models-check
 ```
 
-Current local blocker on 2026-05-25: Splunkbase requires login to download both packages, and the local Docker daemon is inactive, so the repo cannot install or invoke AI Toolkit until those two conditions are fixed.
+Current local blocker on 2026-05-25: AI Toolkit 5.7.4 and PSC 4.3.2 are installed, and the `ai` command is available. Hosted Models still cannot be invoked because local Splunk Enterprise returns `404 Not Found` for `/services/authorization/scs_tokens?principalId=slim&scope=tenant`, so AI Toolkit cannot fetch Splunk Cloud Services models into its LLM connection config.
+
+Latest blocker proof:
+
+```text
+PASSED splunk-rest - management API is reachable
+PASSED splunk-ai-toolkit-app - AI Toolkit app is installed
+PASSED splunk-psc-add-on - Python for Scientific Computing add-on is installed
+PASSED splunk-ai-command - `ai` search command is available
+CHECK splunk-legacy-llm-commands - found=none
+FAILED splunk-scs-token-endpoint - status=404 message=Not Found
+FAILED splunk-hosted-models-search - Error in 'ai' command: No configuration found for provider: "Splunk Hosted Models" and model: "OpenAI GPT-OSS 20B" | Error in 'ai' command: No configuration found for provider: "Splunk Hosted Models" and model: "gpt-oss-20b" | Error in 'ai' command: No default LLM configuration found.
+```
 
 Then run Sentinel agent checks:
 
@@ -160,9 +172,12 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_M
 For API webhook e2e, start the API first:
 
 ```bash
+pnpm build
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel PORT=3001 node apps/api/dist/server.js
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm sentinel:e2e
 ```
+
+If `.env` sets `OPERAIQ_GENERATION_PROVIDER=nvidia` or another OpenAI-compatible free model, that provider takes precedence over `OPERAIQ_AI_PROVIDER=offline`. This is allowed for local free-model validation; generated post-mortem arrays are normalized before writing to KV Store and HEC.
 
 ## Splunk Alert Action
 

@@ -51,6 +51,47 @@ export const postmortemGeneratedFieldsSchema = z.object({
 
 export type PostmortemGeneratedFields = z.infer<typeof postmortemGeneratedFieldsSchema>;
 
+function stringifyGeneratedValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["text", "description", "summary", "factor", "action", "recommendation", "step", "cause", "title", "name"]) {
+    const field = record[key];
+    if (typeof field === "string" && field.trim().length > 0) return field.trim();
+  }
+
+  return Object.entries(record)
+    .map(([key, field]) => {
+      if (typeof field === "string" || typeof field === "number" || typeof field === "boolean") return `${key}: ${field}`;
+      if (Array.isArray(field)) {
+        const values = field.map(stringifyGeneratedValue).filter(Boolean);
+        return values.length > 0 ? `${key}: ${values.join(", ")}` : "";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function normalizeGeneratedStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(stringifyGeneratedValue).filter((item) => item.length > 0);
+  const single = stringifyGeneratedValue(value);
+  return single.length > 0 ? [single] : [];
+}
+
+function normalizePostmortemGeneratedFields(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    ...record,
+    summary: stringifyGeneratedValue(record.summary),
+    contributingFactors: normalizeGeneratedStringArray(record.contributingFactors),
+    preventionActions: normalizeGeneratedStringArray(record.preventionActions)
+  };
+}
+
 const openAiCompatibleChatResponseSchema = z.object({
   choices: z.array(
     z.object({
@@ -157,7 +198,7 @@ export async function generatePostmortemFields(input: {
     JSON.stringify(input)
   ].join("\n");
   const text = await generateJsonText(prompt);
-  return postmortemGeneratedFieldsSchema.parse(extractJson(text));
+  return postmortemGeneratedFieldsSchema.parse(normalizePostmortemGeneratedFields(extractJson(text)));
 }
 
 export const generatedRunbookSchema = z.object({
