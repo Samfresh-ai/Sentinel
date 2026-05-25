@@ -1,0 +1,45 @@
+{
+  "name": "operaiq",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --sort build",
+    "typecheck": "pnpm -r --sort typecheck && tsc -p tsconfig.scripts.json --pretty false",
+    "dev": "pnpm -r --parallel dev",
+    "setup:pubsub": "tsx --conditions=development scripts/setup-pubsub.ts",
+    "preflight": "tsx --conditions=development scripts/preflight.ts",
+    "seed": "tsx --conditions=development scripts/seed.ts",
+    "seed:verify": "tsx --conditions=development scripts/seed.ts --verify",
+    "brain:test": "pnpm --filter @operaiq/brain brain:test",
+    "agent:test-tools": "pnpm --filter @operaiq/agent agent:test-tools",
+    "agent:smoke-test": "pnpm --filter @operaiq/agent agent:smoke-test",
+    "test-webhook": "tsx --conditions=development scripts/test-webhook.ts",
+    "verify:e2e": "tsx --conditions=development scripts/verify.ts"
+  },
+  "devDependencies": {
+    "@google-cloud/pubsub": "^4.8.0",
+    "google-auth-library": "^9.15.1",
+    "@operaiq/agent": "workspace:*",
+    "@operaiq/brain": "workspace:*",
+    "@operaiq/shared": "workspace:*",
+    "@types/node": "^22.10.10",
+    "dotenv": "^16.4.7",
+    "mongodb": "^6.12.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@google/genai",
+      "esbuild",
+      "protobufjs",
+      "sharp"
+    ]
+  }
+}

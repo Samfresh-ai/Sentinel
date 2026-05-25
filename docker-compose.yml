@@ -1,0 +1,31 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  mongodb-proxy:
+    image: alpine/socat:1.8.0.0
+    command: ["-d", "-d", "TCP-LISTEN:27017,fork,reuseaddr", "OPENSSL:${MONGODB_PROXY_TARGET:-cluster0.example.mongodb.net}:27017,verify=0"]
+    profiles: ["atlas-proxy"]

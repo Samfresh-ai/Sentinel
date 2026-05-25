@@ -1,0 +1,82 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/api/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/web/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - packages/agent/Dockerfile.remediation
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - operaiq-api
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - operaiq-web
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        for action in scale-service restart-pod purge-cache rotate-connection-pool notify-team; do
+          gcloud run jobs deploy "operaiq-remediate-$${action}" \
+            --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA" \
+            --region "${_REGION}" \
+            --set-env-vars "GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID,GOOGLE_CLOUD_REGION=${_REGION}" \
+            --max-retries 0
+        done
+substitutions:
+  _REGION: us-central1
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA

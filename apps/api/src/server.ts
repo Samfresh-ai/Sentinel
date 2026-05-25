@@ -1,0 +1,19 @@
+import { createCollectionsAndIndexes } from "@operaiq/brain";
+import { createLogger } from "@operaiq/shared";
+import { createApp } from "./app.js";
+
+const logger = createLogger("operaiq-api-server");
+
+async function main(): Promise<void> {
+  await createCollectionsAndIndexes();
+  const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+  const app = createApp();
+  app.listen(port, () => {
+    logger.info({ port }, "OperaIQ API listening");
+  });
+}
+
+main().catch((error: unknown) => {
+  logger.fatal({ error }, "OperaIQ API failed to start");
+  process.exitCode = 1;
+});

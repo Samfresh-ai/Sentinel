@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.git
+.serena
+*.log
+coverage
+tmp

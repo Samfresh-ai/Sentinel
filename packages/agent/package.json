@@ -1,0 +1,38 @@
+{
+  "name": "@operaiq/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "agent:test-tools": "tsx --conditions=development src/test-tools.ts",
+    "agent:smoke-test": "tsx --conditions=development src/smoke-test.ts",
+    "remediation-job": "node dist/remediation-job.js"
+  },
+  "dependencies": {
+    "@google-cloud/run": "^1.4.0",
+    "@google-cloud/vertexai": "^1.9.3",
+    "@google/genai": "^1.52.0",
+    "@modelcontextprotocol/sdk": "^1.4.1",
+    "@mongodb-js/mongodb-mcp-server": "^0.0.3",
+    "@operaiq/brain": "workspace:*",
+    "@operaiq/shared": "workspace:*",
+    "@slack/web-api": "^7.8.0",
+    "execa": "^9.5.2",
+    "mongodb": "^6.12.0",
+    "pino": "^9.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
