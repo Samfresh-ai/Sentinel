@@ -17,6 +17,7 @@
     "seed": "tsx --conditions=development scripts/seed.ts",
     "seed:verify": "tsx --conditions=development scripts/seed.ts --verify",
     "splunk:setup-check": "tsx --conditions=development scripts/splunk-setup-check.ts",
+    "splunk:hosted-models-check": "tsx --conditions=development scripts/splunk-hosted-models-check.ts",
     "splunk:seed": "tsx --conditions=development scripts/splunk-seed.ts",
     "splunk:verify": "tsx --conditions=development scripts/splunk-verify.ts",
     "brain:test": "pnpm --filter @operaiq/brain brain:test",

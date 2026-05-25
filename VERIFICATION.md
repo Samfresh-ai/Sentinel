@@ -235,6 +235,8 @@ PASSED sentinel:e2e - incident=1480e3011b278a91ed1245bb, postmortemId=3d3009a4e0
 
 See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands. Current known Sentinel gaps: Splunk Hosted Models are not proven on this local license, SPL keyword similarity is lower quality than Atlas Vector Search, and the official Splunk MCP npm package was unavailable so the repo uses a custom REST adapter.
 
+Hosted Models follow-up, 2026-05-25: the blocker is now more specific than "Developer License unproven." Official Splunk docs route Hosted Models through AI Toolkit 5.7.x and the `ai` SPL command. Local re-probe added `pnpm splunk:hosted-models-check`; current run fails at `connect ECONNREFUSED 127.0.0.1:8089` because Docker/Splunk is down. Splunkbase download probes for AI Toolkit 5.7.4 and PSC 4.3.2 returned HTTP 401 and the browser page shows `Log in to Download`. After authenticated install, the next check is whether the account exposes `list_tokens_scs` and the Splunk Hosted Models provider.
+
 ## Final Status
 
 The local zero-dollar verification path is working and does not require card billing. Slack and the container-size target are handled. Sentinel now passes live local Splunk setup, seed, verify, tool, smoke, and webhook e2e checks, while OperaIQ still passes local `verify:e2e` from the same repo. Production OperaIQ is still not complete: remaining blockers are active Google Cloud billing for Vertex/Cloud Run and a public HTTPS API URL for Pub/Sub push. The local modes are explicit and reversible; normal architecture remains the default.

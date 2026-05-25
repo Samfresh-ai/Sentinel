@@ -82,6 +82,7 @@ Sentinel verification commands:
 
 ```bash
 pnpm splunk:setup-check
+pnpm splunk:hosted-models-check
 pnpm splunk:seed
 pnpm splunk:verify
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:test-tools
@@ -89,7 +90,7 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_M
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:e2e
 ```
 
-If Splunk Hosted Models are unavailable on the local Developer License, Sentinel uses the existing Gemini/offline generation path for runbook and post-mortem fields. That fallback is documented in `SENTINEL_VERIFICATION.md`; the Splunk-native parts remain KV Store memory, SPL investigation, HEC indexing, and Splunk Alert Action triggering.
+Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` / `llmgenerate` names. Install AI Toolkit 5.7.x and the matching Python for Scientific Computing add-on, then run `pnpm splunk:hosted-models-check`. If that check still fails, Sentinel uses the configured generation fallback for runbook and post-mortem fields. The exact current blocker is documented in `SENTINEL_VERIFICATION.md`; the Splunk-native parts remain KV Store memory, SPL investigation, HEC indexing, and Splunk Alert Action triggering.
 
 ## Environment
 

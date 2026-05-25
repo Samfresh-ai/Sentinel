@@ -126,9 +126,29 @@ Do not commit `.env`.
 
 ```bash
 pnpm splunk:setup-check
+pnpm splunk:hosted-models-check
 pnpm splunk:seed
 pnpm splunk:verify
 ```
+
+## Splunk Hosted Models
+
+Hosted Models are not available from plain Splunk Enterprise alone. Splunk documents the LLM path through the AI Toolkit `ai` SPL command.
+
+Required before claiming the Hosted Models prize lane:
+
+1. Install AI Toolkit 5.7.x from Splunkbase.
+2. Install the matching Python for Scientific Computing add-on. For AI Toolkit 5.7.4, Splunk documents PSC 4.3.2.
+3. Restart Splunk.
+4. Confirm the `ai` SPL command exists.
+5. Confirm the current user can see the Splunk Hosted Models provider in AI Toolkit Connections. Splunk docs say this requires `list_tokens_scs`.
+6. Run:
+
+```bash
+pnpm splunk:hosted-models-check
+```
+
+Current local blocker on 2026-05-25: Splunkbase requires login to download both packages, and the local Docker daemon is inactive, so the repo cannot install or invoke AI Toolkit until those two conditions are fixed.
 
 Then run Sentinel agent checks:
 
