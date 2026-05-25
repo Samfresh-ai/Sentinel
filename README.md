@@ -54,6 +54,18 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_LOCAL_PUBSUB_DIREC
 
 `OPERAIQ_AI_PROVIDER=offline` uses deterministic local embeddings and deterministic generated fields for verification only. `OPERAIQ_LOCAL_VERIFY=true` skips production Slack readiness checks and records remediation without dispatching Cloud Run. `OPERAIQ_LOCAL_PUBSUB_DIRECT=true` lets the e2e script deliver the Pub/Sub payload to the local API because Google Pub/Sub cannot push to localhost.
 
+To use a free hosted model for generated runbooks, incident conclusions, and post-mortem fields while keeping local/offline embeddings, set:
+
+```bash
+OPERAIQ_AI_PROVIDER=offline
+OPERAIQ_GENERATION_PROVIDER=nvidia
+NVIDIA_API_KEY=<redacted>
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=nvidia/llama-3.1-nemotron-nano-8b-v1
+```
+
+The same code also supports any OpenAI-compatible endpoint through `OPERAIQ_GENERATION_PROVIDER=openai-compatible` plus `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`, and `OPENAI_COMPATIBLE_MODEL`. Do not set `OPERAIQ_AI_PROVIDER=nvidia`; embeddings still use `vertex` or `offline`.
+
 ## Running Sentinel
 
 Sentinel is the Splunk-native port of OperaIQ. It lives alongside OperaIQ in the same monorepo. The agent loop, UI, API server, and Cloud Run remediation jobs stay shared; the changed platform layer is Splunk KV Store, SPL/HEC, and the Splunk Alert Action webhook.
@@ -89,6 +101,13 @@ If Splunk Hosted Models are unavailable on the local Developer License, Sentinel
 | `GOOGLE_CLOUD_REGION` | Cloud Run region, default `us-central1`. |
 | `VERTEX_AI_LOCATION` | Vertex AI location, default `us-central1`. |
 | `OPERAIQ_AI_PROVIDER` | `vertex` for production, `offline` for local zero-billing verification. |
+| `OPERAIQ_GENERATION_PROVIDER` | Optional text-generation override: `vertex`, `offline`, `nvidia`, or `openai-compatible`. |
+| `NVIDIA_API_KEY` | NVIDIA Build/NIM API key for free hosted generation; keep it only in `.env`. |
+| `NVIDIA_BASE_URL` | NVIDIA OpenAI-compatible base URL, default `https://integrate.api.nvidia.com/v1`. |
+| `NVIDIA_MODEL` | NVIDIA model ID, default `nvidia/llama-3.1-nemotron-nano-8b-v1`. |
+| `OPENAI_COMPATIBLE_API_KEY` | Generic OpenAI-compatible generation API key. |
+| `OPENAI_COMPATIBLE_BASE_URL` | Generic OpenAI-compatible generation base URL. |
+| `OPENAI_COMPATIBLE_MODEL` | Generic OpenAI-compatible generation model ID. |
 | `AGENT_BUILDER_AGENT_ID` | Agent Builder ID after deployment. |
 | `PUBSUB_ALERT_TOPIC` | Alert topic, default `operaiq-alerts`. |
 | `PUBSUB_EVENTS_TOPIC` | Reasoning event topic, default `operaiq-agent-events`. |

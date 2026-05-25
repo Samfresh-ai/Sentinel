@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
-import { getAgentEnv } from "./env.js";
+import { getAgentEnv, type AgentEnv } from "./env.js";
 
 let aiClient: GoogleGenAI | undefined;
 
@@ -16,8 +16,14 @@ function getAiClient(): GoogleGenAI {
   return aiClient;
 }
 
+type GenerationProvider = "vertex" | "offline" | "nvidia" | "openai-compatible";
+
+function generationProvider(env: AgentEnv): GenerationProvider {
+  return env.OPERAIQ_GENERATION_PROVIDER ?? env.OPERAIQ_AI_PROVIDER;
+}
+
 function isOfflineAiProvider(): boolean {
-  return getAgentEnv().OPERAIQ_AI_PROVIDER === "offline";
+  return generationProvider(getAgentEnv()) === "offline";
 }
 
 function extractJson(text: string): unknown {
@@ -44,6 +50,84 @@ export const postmortemGeneratedFieldsSchema = z.object({
 });
 
 export type PostmortemGeneratedFields = z.infer<typeof postmortemGeneratedFieldsSchema>;
+
+const openAiCompatibleChatResponseSchema = z.object({
+  choices: z.array(
+    z.object({
+      message: z
+        .object({
+          content: z.string().nullable().optional()
+        })
+        .passthrough()
+    }).passthrough()
+  ).min(1)
+}).passthrough();
+
+function openAiCompatibleConfig(env: AgentEnv): { apiKey: string; baseUrl: string; model: string } {
+  const provider = generationProvider(env);
+  if (provider === "nvidia") {
+    if (!env.NVIDIA_API_KEY) {
+      throw new Error("NVIDIA_API_KEY is required when OPERAIQ_GENERATION_PROVIDER=nvidia");
+    }
+    return {
+      apiKey: env.NVIDIA_API_KEY,
+      baseUrl: env.NVIDIA_BASE_URL,
+      model: env.NVIDIA_MODEL
+    };
+  }
+
+  if (!env.OPENAI_COMPATIBLE_API_KEY || !env.OPENAI_COMPATIBLE_BASE_URL || !env.OPENAI_COMPATIBLE_MODEL) {
+    throw new Error(
+      "OPENAI_COMPATIBLE_API_KEY, OPENAI_COMPATIBLE_BASE_URL, and OPENAI_COMPATIBLE_MODEL are required when OPERAIQ_GENERATION_PROVIDER=openai-compatible"
+    );
+  }
+  return {
+    apiKey: env.OPENAI_COMPATIBLE_API_KEY,
+    baseUrl: env.OPENAI_COMPATIBLE_BASE_URL,
+    model: env.OPENAI_COMPATIBLE_MODEL
+  };
+}
+
+async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
+  const config = openAiCompatibleConfig(getAgentEnv());
+  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+      max_tokens: 900
+    })
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`OpenAI-compatible generation failed with ${response.status}: ${body}`);
+  }
+  const parsed = openAiCompatibleChatResponseSchema.parse(JSON.parse(body));
+  const text = parsed.choices[0]?.message.content;
+  if (!text) {
+    throw new Error("OpenAI-compatible generation returned an empty message");
+  }
+  return text;
+}
+
+async function generateJsonText(prompt: string): Promise<string> {
+  const env = getAgentEnv();
+  const provider = generationProvider(env);
+  if (provider === "nvidia" || provider === "openai-compatible") {
+    return generateOpenAiCompatibleText(prompt);
+  }
+
+  const response = await getAiClient().models.generateContent({
+    model: "gemini-2.0-flash",
+    contents: [{ role: "user", parts: [{ text: prompt }] }]
+  });
+  return response.text ?? "";
+}
 
 export async function generatePostmortemFields(input: {
   title: string;
@@ -72,11 +156,7 @@ export async function generatePostmortemFields(input: {
     "Do not use generic filler. Make each field specific to the incident data.",
     JSON.stringify(input)
   ].join("\n");
-  const response = await getAiClient().models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
-  });
-  const text = response.text ?? "";
+  const text = await generateJsonText(prompt);
   return postmortemGeneratedFieldsSchema.parse(extractJson(text));
 }
 
@@ -133,11 +213,7 @@ export async function generateRunbook(input: {
     "Return only JSON with title, incidentType, steps, successCriteria.",
     JSON.stringify(input)
   ].join("\n");
-  const response = await getAiClient().models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
-  });
-  const text = response.text ?? "";
+  const text = await generateJsonText(prompt);
   return generatedRunbookSchema.parse(extractJson(text));
 }
 
@@ -169,10 +245,6 @@ export async function generateIncidentConclusion(input: {
     "Base the answer on the alert, similar incidents, dependency graph, and remediation results.",
     JSON.stringify(input)
   ].join("\n");
-  const response = await getAiClient().models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
-  });
-  const text = response.text ?? "";
+  const text = await generateJsonText(prompt);
   return incidentConclusionSchema.parse(extractJson(text));
 }
