@@ -20,6 +20,9 @@ importers:
       '@operaiq/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@operaiq/splunk-brain':
+        specifier: workspace:*
+        version: link:packages/splunk-brain
       '@types/node':
         specifier: ^22.10.10
         version: 22.19.19
@@ -38,6 +41,9 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   apps/api:
     dependencies:
@@ -53,6 +59,9 @@ importers:
       '@operaiq/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@operaiq/splunk-brain':
+        specifier: workspace:*
+        version: link:../../packages/splunk-brain
       '@slack/web-api':
         specifier: ^7.8.0
         version: 7.16.0
@@ -175,6 +184,12 @@ importers:
       '@operaiq/shared':
         specifier: workspace:*
         version: link:../shared
+      '@operaiq/splunk-brain':
+        specifier: workspace:*
+        version: link:../splunk-brain
+      '@operaiq/splunk-mcp':
+        specifier: workspace:*
+        version: link:../splunk-mcp
       '@slack/web-api':
         specifier: ^7.8.0
         version: 7.16.0
@@ -231,6 +246,41 @@ importers:
       pino:
         specifier: ^9.6.0
         version: 9.14.0
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/splunk-brain:
+    dependencies:
+      '@operaiq/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/splunk-mcp:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.4.1
+        version: 1.29.0(zod@3.25.76)
+      '@operaiq/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@operaiq/splunk-brain':
+        specifier: workspace:*
+        version: link:../splunk-brain
       zod:
         specifier: ^3.24.1
         version: 3.25.76

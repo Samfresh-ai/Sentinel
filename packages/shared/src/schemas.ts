@@ -11,7 +11,7 @@ export const remediationActionSchema = z.enum([
   "notify_team"
 ]);
 export const riskLevelSchema = z.enum(["low", "medium", "high"]);
-export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "MAP", "RETRIEVE", "ACT", "CLOSE", "ERROR"]);
+export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", "MAP", "RETRIEVE", "ACT", "CLOSE", "ERROR"]);
 
 export const envSchema = z.object({
   MONGODB_ATLAS_URI: z.string().min(1),

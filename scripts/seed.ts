@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
 import { ObjectId } from "mongodb";
 import {
   closeMongoClient,
@@ -31,7 +32,7 @@ function minutesAgo(minutes: number): Date {
   return new Date(now.getTime() - minutes * 60_000);
 }
 
-const runbooks: NewRunbookDocument[] = [
+export const runbooks: NewRunbookDocument[] = [
   {
     title: "Redis connection exhaustion recovery",
     incidentType: "redis-connection-exhaustion",
@@ -266,7 +267,7 @@ const runbooks: NewRunbookDocument[] = [
   }
 ];
 
-const incidents: NewIncidentDocument[] = [
+export const incidents: NewIncidentDocument[] = [
   {
     title: "INC-2026-0101 Redis connection pool exhausted during checkout",
     severity: "P1",
@@ -549,7 +550,7 @@ const incidents: NewIncidentDocument[] = [
   }
 ];
 
-const patterns: NewPatternDocument[] = [
+export const patterns: NewPatternDocument[] = [
   {
     name: "redis-connection-pool-exhaustion",
     symptomSignals: ["Redis connection timeouts", "maxclients reached", "connection pool exhausted"],
@@ -791,12 +792,14 @@ async function main(): Promise<void> {
   await seed();
 }
 
-main()
-  .catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    writeLine(`FAILED seed - ${message}`);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await closeMongoClient();
-  });
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main()
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeLine(`FAILED seed - ${message}`);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await closeMongoClient();
+    });
+}

@@ -16,9 +16,15 @@
     "preflight": "tsx --conditions=development scripts/preflight.ts",
     "seed": "tsx --conditions=development scripts/seed.ts",
     "seed:verify": "tsx --conditions=development scripts/seed.ts --verify",
+    "splunk:setup-check": "tsx --conditions=development scripts/splunk-setup-check.ts",
+    "splunk:seed": "tsx --conditions=development scripts/splunk-seed.ts",
+    "splunk:verify": "tsx --conditions=development scripts/splunk-verify.ts",
     "brain:test": "pnpm --filter @operaiq/brain brain:test",
     "agent:test-tools": "pnpm --filter @operaiq/agent agent:test-tools",
     "agent:smoke-test": "pnpm --filter @operaiq/agent agent:smoke-test",
+    "sentinel:test-tools": "tsx --conditions=development scripts/sentinel-test-tools.ts",
+    "sentinel:smoke-test": "tsx --conditions=development scripts/sentinel-smoke-test.ts",
+    "sentinel:e2e": "tsx --conditions=development scripts/sentinel-e2e.ts",
     "test-webhook": "tsx --conditions=development scripts/test-webhook.ts",
     "verify:e2e": "tsx --conditions=development scripts/verify.ts"
   },
@@ -28,11 +34,13 @@
     "@operaiq/agent": "workspace:*",
     "@operaiq/brain": "workspace:*",
     "@operaiq/shared": "workspace:*",
+    "@operaiq/splunk-brain": "workspace:*",
     "@types/node": "^22.10.10",
     "dotenv": "^16.4.7",
     "mongodb": "^6.12.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "zod": "^3.24.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

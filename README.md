@@ -54,6 +54,31 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_LOCAL_PUBSUB_DIREC
 
 `OPERAIQ_AI_PROVIDER=offline` uses deterministic local embeddings and deterministic generated fields for verification only. `OPERAIQ_LOCAL_VERIFY=true` skips production Slack readiness checks and records remediation without dispatching Cloud Run. `OPERAIQ_LOCAL_PUBSUB_DIRECT=true` lets the e2e script deliver the Pub/Sub payload to the local API because Google Pub/Sub cannot push to localhost.
 
+## Running Sentinel
+
+Sentinel is the Splunk-native port of OperaIQ. It lives alongside OperaIQ in the same monorepo. The agent loop, UI, API server, and Cloud Run remediation jobs stay shared; the changed platform layer is Splunk KV Store, SPL/HEC, and the Splunk Alert Action webhook.
+
+After completing the OperaIQ setup, Sentinel needs three additional steps:
+
+1. Install and license Splunk Enterprise 9.x locally. See `SPLUNK_SETUP.md`.
+2. Copy Splunk credentials and the HEC token into `.env`.
+3. Run `pnpm splunk:setup-check`, then `pnpm splunk:seed`.
+
+Sentinel listens at `POST /webhooks/splunk-alert`. OperaIQ still listens at `POST /webhooks/alert`. Both can run from the same `docker compose up --build` process once their backing services are configured.
+
+Sentinel verification commands:
+
+```bash
+pnpm splunk:setup-check
+pnpm splunk:seed
+pnpm splunk:verify
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:test-tools
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:smoke-test
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:e2e
+```
+
+If Splunk Hosted Models are unavailable on the local Developer License, Sentinel uses the existing Gemini/offline generation path for runbook and post-mortem fields. That fallback is documented in `SENTINEL_VERIFICATION.md`; the Splunk-native parts remain KV Store memory, SPL investigation, HEC indexing, and Splunk Alert Action triggering.
+
 ## Environment
 
 | Variable | Description |
@@ -76,6 +101,16 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_LOCAL_PUBSUB_DIREC
 | `SLACK_BOT_TOKEN` | Slack bot token with `chat:write`. |
 | `SLACK_DEFAULT_INCIDENT_CHANNEL` | Slack channel ID for incident updates. |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret for approval interactions. |
+| `SPLUNK_HOST` | Splunk Enterprise host for Sentinel, default `localhost`. |
+| `SPLUNK_MGMT_PORT` | Splunk management API port, default `8089`. |
+| `SPLUNK_HEC_PORT` | Splunk HTTP Event Collector port, default `8088`. |
+| `SPLUNK_USERNAME` | Splunk REST username, usually `admin` locally. |
+| `SPLUNK_PASSWORD` | Splunk REST password; redacted by logger. |
+| `SPLUNK_HEC_TOKEN` | HEC token for writing Sentinel events. |
+| `SPLUNK_APP` | Splunk app namespace for KV Store, default `sentinel`. |
+| `SPLUNK_INDEX` | Splunk event index for Sentinel, default `sentinel`. |
+| `AGENT_NAME` | Agent identity; `OperaIQ` by default, `Sentinel` for Sentinel scripts/runtime. |
+| `SENTINEL_MODE` | Enables Sentinel data-source behavior inside shared tools. |
 | `PORT` | API port, default `3001`. |
 | `WEBHOOK_SECRET` | Shared secret checked on alert webhooks. |
 | `AGENT_TOOL_SECRET` | Bearer token for Agent Builder tool execution. Defaults to `WEBHOOK_SECRET` when unset. |

@@ -21,7 +21,9 @@
     "paths": {
       "@operaiq/shared": ["packages/shared/src/index.ts"],
       "@operaiq/brain": ["packages/brain/src/index.ts"],
-      "@operaiq/agent": ["packages/agent/src/index.ts"]
+      "@operaiq/agent": ["packages/agent/src/index.ts"],
+      "@operaiq/splunk-brain": ["packages/splunk-brain/src/index.ts"],
+      "@operaiq/splunk-mcp": ["packages/splunk-mcp/src/index.ts"]
     }
   }
 }

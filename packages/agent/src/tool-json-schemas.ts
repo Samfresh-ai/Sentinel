@@ -32,6 +32,23 @@ export const getServiceDependencyGraphSchema: JsonSchema = {
   }
 };
 
+export const querySplunkLogsSchema: JsonSchema = {
+  type: "object",
+  required: ["spl", "description"],
+  properties: {
+    spl: { type: "string", description: "Targeted SPL search to run against recent Splunk events" },
+    timeRange: {
+      type: "object",
+      properties: {
+        earliest: { type: "string", description: "Splunk earliest time, for example -15m" },
+        latest: { type: "string", description: "Splunk latest time, for example now" }
+      },
+      additionalProperties: false
+    },
+    description: { type: "string", description: "Plain-English reason this investigation search is being run" }
+  }
+};
+
 export const executeRemediationSchema: JsonSchema = {
   type: "object",
   required: ["action", "targetService", "parameters"],

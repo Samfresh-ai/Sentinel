@@ -22,6 +22,8 @@ import {
   searchSimilarIncidents,
   writePostmortem
 } from "@operaiq/agent";
+import { runSentinelAgent } from "@operaiq/agent";
+import { insertSentinelIncident } from "@operaiq/splunk-brain";
 import {
   createLogger,
   normalizeAlertPayload,
@@ -38,6 +40,7 @@ import {
   startAgentEventsSubscription
 } from "./pubsub.js";
 import { verifyPubSubPushAuth } from "./pubsub-auth.js";
+import { SplunkAlertPayload } from "./schemas/splunk-alert.js";
 import { serializeIncident, serializePattern, serializePostmortem, serializeRunbook, serializeService } from "./serialize.js";
 import { verifySlackSignature } from "./slack.js";
 
@@ -104,6 +107,52 @@ async function createIncidentFromAlert(alert: NormalizedAlert): Promise<string> 
     postMortemId: null
   });
   return incidentId.toHexString();
+}
+
+function severityFromSplunk(value: string | undefined): "P1" | "P2" | "P3" | "P4" {
+  const normalized = value?.toUpperCase() ?? "";
+  if (normalized.includes("P1") || normalized.includes("CRITICAL")) return "P1";
+  if (normalized.includes("P2") || normalized.includes("HIGH") || normalized.includes("ERROR")) return "P2";
+  if (normalized.includes("P3") || normalized.includes("WARN")) return "P3";
+  return "P4";
+}
+
+function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
+  const service = payload.result.service ?? payload.result.host ?? payload.result.source ?? "unknown-service";
+  const symptoms = [
+    payload.search_name,
+    payload.result.sourcetype,
+    payload.result.source,
+    payload.result._raw
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return {
+    source: "operaiq",
+    title: `Splunk alert: ${payload.search_name}`,
+    severity: severityFromSplunk(payload.result.severity ?? payload.configuration?.severity),
+    affectedServices: [service],
+    symptoms: symptoms.length > 0 ? symptoms.slice(0, 12) : ["splunk saved search alert fired"],
+    incidentType: payload.search_name,
+    detectedAt: new Date().toISOString(),
+    rawPayload: payload as unknown as Record<string, unknown>
+  };
+}
+
+async function createSentinelIncidentFromAlert(alert: NormalizedAlert): Promise<string> {
+  return insertSentinelIncident({
+    title: alert.title,
+    severity: alert.severity,
+    status: "open",
+    symptoms: alert.symptoms,
+    affectedServices: alert.affectedServices,
+    rootCause: null,
+    resolution: null,
+    remediationSteps: [],
+    detectedAt: alert.detectedAt,
+    resolvedAt: null,
+    durationMinutes: null,
+    postMortemId: null,
+    rawPayload: alert.rawPayload
+  });
 }
 
 type ToolHandler = (input: unknown) => Promise<unknown>;
@@ -216,6 +265,27 @@ export function createApp(): express.Express {
       const incidentId = await createIncidentFromAlert(alert);
       const messageId = await publishAlertEvent({ incidentId, alert });
       res.status(202).json({ incidentId, status: "open", pubsubMessageId: messageId });
+    })
+  );
+
+  app.post(
+    "/webhooks/splunk-alert",
+    asyncHandler(async (req, res) => {
+      const payload = SplunkAlertPayload.parse(req.body);
+      const alert = normalizeSplunkAlert(payload);
+      const incidentId = await createSentinelIncidentFromAlert(alert);
+      setImmediate(() => {
+        runSentinelAgent({ incidentId, alert }, async (event) => {
+          logger.info({ event }, "Sentinel agent event");
+        })
+          .then((result) => {
+            logger.info({ incidentId, result }, "Sentinel agent completed");
+          })
+          .catch((error: unknown) => {
+            logger.error({ incidentId, error }, "Sentinel agent failed");
+          });
+      });
+      res.status(202).json({ incidentId, status: "open", trigger: "splunk-alert-action" });
     })
   );
 

@@ -2,6 +2,11 @@ import {
   executeRemediationDefinition,
   getRunbookDefinition,
   getServiceDependencyGraphDefinition,
+  querySplunkLogsDefinition,
+  sentinelGetRunbookDefinition,
+  sentinelGetServiceDependencyGraphDefinition,
+  sentinelSearchSimilarIncidentsDefinition,
+  sentinelWritePostmortemDefinition,
   searchSimilarIncidentsDefinition,
   writePostmortemDefinition
 } from "./tools/index.js";
@@ -23,12 +28,39 @@ STEP 6 - CLOSE: Once the incident is resolved, call write_postmortem with the co
 
 You must narrate every decision step in plain English before taking action. This narration is streamed to the engineering team in real time. They are watching you work.`;
 
+export const sentinelSystemInstruction = `You are Sentinel, a Splunk-native autonomous SRE agent. When a Splunk alert arrives:
+
+STEP 1 - ASSESS: Parse the alert. Extract: affected service, symptoms list, severity.
+
+STEP 2 - REMEMBER: Call search_similar_incidents with the symptoms. Analyze returned Splunk-backed incidents. Note which resolutions worked fastest for highest-similarity incidents.
+
+STEP 2.5 - INVESTIGATE: Call query_splunk_logs with a targeted SPL search against recent events for the affected service. Look for error patterns, connection failures, timeout spikes, memory pressure, or unusual request volumes in the last 15-30 minutes. Narrate what the search returned in plain English before proceeding. This is the most important step: you are looking at what is actually happening right now, not just what happened before.
+
+STEP 3 - MAP: Call get_service_dependency_graph for the affected service. Identify upstream dependencies that could be causing this and downstream dependents at risk.
+
+STEP 4 - RETRIEVE: Call get_runbook with the incident description. If a runbook is returned, use it as your primary action plan. If no runbook is found, generate one from your reasoning and save it.
+
+STEP 5 - ACT: Execute remediation steps in order, starting with lowest risk. Call execute_remediation for each step. After each step, wait 30 seconds and assess whether symptoms have improved before proceeding. Stop executing if a step requires human approval - notify via Slack and wait.
+
+STEP 6 - CLOSE: Once the incident is resolved, call write_postmortem with the complete timeline, root cause, and lesson learned. Be specific. Generic post-mortems are rejected.
+
+You must narrate every decision step in plain English before taking action. This narration is streamed to the engineering team in real time. They are watching you work.`;
+
 export const agentToolDefinitions: AgentToolDefinition[] = [
   searchSimilarIncidentsDefinition,
   getServiceDependencyGraphDefinition,
   getRunbookDefinition,
   executeRemediationDefinition,
   writePostmortemDefinition
+];
+
+export const sentinelAgentToolDefinitions: AgentToolDefinition[] = [
+  sentinelSearchSimilarIncidentsDefinition,
+  querySplunkLogsDefinition,
+  sentinelGetServiceDependencyGraphDefinition,
+  sentinelGetRunbookDefinition,
+  executeRemediationDefinition,
+  sentinelWritePostmortemDefinition
 ];
 
 export interface AgentBuilderConfig {
@@ -52,6 +84,20 @@ export function buildAgentBuilderConfig(toolExecutionBaseUrl: string): AgentBuil
     model: "gemini-2.0-flash",
     systemInstruction: operaIqSystemInstruction,
     tools: agentToolDefinitions,
+    toolExecutionBaseUrl,
+    openApiSpecUrl: `${toolExecutionBaseUrl.replace(/\/$/, "")}/agent/openapi.json`
+  };
+}
+
+export function buildSentinelAgentConfig(toolExecutionBaseUrl: string): AgentBuilderConfig {
+  return {
+    displayName: "Sentinel",
+    description: "Splunk-native incident response agent with KV Store memory, live SPL investigation, and safe remediation tools.",
+    defaultLanguageCode: "en",
+    timeZone: "UTC",
+    model: "splunk-hosted-models-or-gemini-fallback",
+    systemInstruction: sentinelSystemInstruction,
+    tools: sentinelAgentToolDefinitions,
     toolExecutionBaseUrl,
     openApiSpecUrl: `${toolExecutionBaseUrl.replace(/\/$/, "")}/agent/openapi.json`
   };

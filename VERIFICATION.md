@@ -194,6 +194,36 @@ External setup attempted:
 
 At 3am, a real SRE opening OperaIQ during a P1 would see the alert tied to remembered incidents, the affected service dependency map, and the next remediation step with its risk level before anyone starts searching old threads. A traditional alert dashboard shows the symptom and timestamp; OperaIQ is meant to show the closest prior fixes, which owners are affected, what action is about to run, and a post-mortem record that becomes searchable for the next incident.
 
+## 6. Sentinel Port Checkpoint
+
+Sentinel is now implemented as a Splunk-native port in the same monorepo, without deleting or replacing the OperaIQ MongoDB/Google path.
+
+Changed components:
+
+- `packages/splunk-brain`: typed Splunk REST, KV Store, SPL search, HEC, and keyword similarity.
+- `packages/splunk-mcp`: custom REST adapter because `@splunk/splunk-mcp` is not currently published on npm.
+- `packages/agent/src/sentinel-runner.ts`: Sentinel agent loop with the new `INVESTIGATE` step.
+- `POST /webhooks/splunk-alert`: Splunk Alert Action webhook that writes a Sentinel incident to KV Store and invokes the agent directly.
+- `scripts/splunk-*` and `scripts/sentinel-*`: setup, seed, verify, tool, smoke, and webhook e2e checks.
+
+Verified after implementation:
+
+```text
+pnpm typecheck
+pnpm build
+OPERAIQ_AI_PROVIDER=offline pnpm seed:verify
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm agent:smoke-test
+```
+
+Sentinel live verification is blocked by local Splunk setup, not TypeScript/build state. Current observed blocker:
+
+```text
+pnpm splunk:setup-check
+FAILED splunk:setup-check - missing SPLUNK_USERNAME, SPLUNK_PASSWORD, SPLUNK_HEC_TOKEN
+```
+
+See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands.
+
 ## Final Status
 
-The local zero-dollar verification path is working and does not require card billing. Slack and the container-size target are now handled. Production is still not complete: remaining blockers are active Google Cloud billing for Vertex/Cloud Run and a public HTTPS API URL for Pub/Sub push. The local mode is explicit and reversible; normal architecture remains the default.
+The local zero-dollar verification path is working and does not require card billing. Slack and the container-size target are now handled. Production OperaIQ is still not complete: remaining blockers are active Google Cloud billing for Vertex/Cloud Run and a public HTTPS API URL for Pub/Sub push. Sentinel is code-complete enough to compile/build, but live e2e is blocked until local Splunk Enterprise is installed/licensed and `.env` has Splunk credentials plus an HEC token. The local modes are explicit and reversible; normal architecture remains the default.

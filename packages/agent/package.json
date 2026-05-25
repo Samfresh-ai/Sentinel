@@ -25,6 +25,8 @@
     "@mongodb-js/mongodb-mcp-server": "^0.0.3",
     "@operaiq/brain": "workspace:*",
     "@operaiq/shared": "workspace:*",
+    "@operaiq/splunk-brain": "workspace:*",
+    "@operaiq/splunk-mcp": "workspace:*",
     "@slack/web-api": "^7.8.0",
     "execa": "^9.5.2",
     "mongodb": "^6.12.0",

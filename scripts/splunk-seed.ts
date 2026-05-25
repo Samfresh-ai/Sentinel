@@ -1,0 +1,197 @@
+import "dotenv/config";
+import {
+  batchInsert,
+  clearCollection,
+  createCollection,
+  sendEvent
+} from "@operaiq/splunk-brain";
+import { incidents, patterns, runbooks } from "./seed.js";
+
+function writeLine(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
+const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
+
+function optionalEnv(name: string): string | null {
+  const value = process.env[name];
+  return value && value.trim().length > 0 ? value : null;
+}
+
+function configuredIncidentChannel(): string | null {
+  return optionalEnv("SLACK_DEFAULT_INCIDENT_CHANNEL");
+}
+
+function serviceRuntimeConfig(serviceName: string, adminBaseUrlEnv: string, cloudRunServiceNameEnv: string) {
+  return {
+    _key: serviceName,
+    serviceName,
+    incidentChannel: configuredIncidentChannel(),
+    adminBaseUrl: optionalEnv(adminBaseUrlEnv),
+    cloudRunServiceName: optionalEnv(cloudRunServiceNameEnv),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+const services = [
+  {
+    _key: "payment-service",
+    name: "payment-service",
+    team: "payments-squad",
+    language: "Node.js",
+    dependencies: ["redis-cache", "postgres-main", "stripe-api", "auth-service"],
+    dependents: [],
+    knownFragilePoints: ["Redis connection pool", "Stripe rate limits", "tax calculation CPU hot path"],
+    slaMs: 300,
+    owners: ["U01PAYMENTS", "U02SRE"],
+    runbookIds: [
+      "redis-connection-exhaustion",
+      "postgres-connection-pool-failure",
+      "stripe-api-rate-limiting",
+      "payment-service-cpu-spike",
+      "disk-full-upstream-timeout"
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    _key: "auth-service",
+    name: "auth-service",
+    team: "identity-squad",
+    language: "Node.js",
+    dependencies: ["redis-cache", "postgres-main"],
+    dependents: ["payment-service"],
+    knownFragilePoints: ["JWT key refresh", "Token introspection cache", "PostgreSQL auth pool"],
+    slaMs: 180,
+    owners: ["U03IDENTITY", "U02SRE"],
+    runbookIds: ["redis-connection-exhaustion", "postgres-connection-pool-failure", "node-memory-leak-oomkill", "dns-resolution-failure"],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    _key: "notification-service",
+    name: "notification-service",
+    team: "messaging-squad",
+    language: "Node.js",
+    dependencies: ["postgres-main"],
+    dependents: [],
+    knownFragilePoints: ["S3 template permissions", "Queue lag", "Template renderer memory"],
+    slaMs: 1000,
+    owners: ["U04MESSAGING", "U02SRE"],
+    runbookIds: ["node-memory-leak-oomkill", "s3-bucket-permission-error", "disk-full-upstream-timeout"],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    _key: "redis-cache",
+    name: "redis-cache",
+    team: "platform-squad",
+    language: "Redis",
+    dependencies: [],
+    dependents: ["payment-service", "auth-service"],
+    knownFragilePoints: ["maxclients", "eviction pressure", "connection storms"],
+    slaMs: 25,
+    owners: ["U05PLATFORM", "U02SRE"],
+    runbookIds: ["redis-connection-exhaustion"],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    _key: "postgres-main",
+    name: "postgres-main",
+    team: "data-platform",
+    language: "PostgreSQL",
+    dependencies: [],
+    dependents: ["payment-service", "auth-service", "notification-service"],
+    knownFragilePoints: ["max connections", "long-running settlement queries", "migration worker contention"],
+    slaMs: 80,
+    owners: ["U06DATA", "U02SRE"],
+    runbookIds: ["postgres-connection-pool-failure"],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+
+const runtimeConfigs = [
+  serviceRuntimeConfig("payment-service", "OPERAIQ_PAYMENT_SERVICE_ADMIN_BASE_URL", "OPERAIQ_PAYMENT_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("auth-service", "OPERAIQ_AUTH_SERVICE_ADMIN_BASE_URL", "OPERAIQ_AUTH_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("notification-service", "OPERAIQ_NOTIFICATION_SERVICE_ADMIN_BASE_URL", "OPERAIQ_NOTIFICATION_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("redis-cache", "OPERAIQ_REDIS_CACHE_ADMIN_BASE_URL", "OPERAIQ_REDIS_CACHE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("postgres-main", "OPERAIQ_POSTGRES_MAIN_ADMIN_BASE_URL", "OPERAIQ_POSTGRES_MAIN_CLOUD_RUN_SERVICE_NAME")
+];
+
+function toIso(value: Date | null): string | null {
+  return value ? value.toISOString() : null;
+}
+
+async function recreateCollections(): Promise<void> {
+  for (const name of ["incidents", "services", "service_runtime_configs", "runbooks", "postmortems", "patterns", "remediation_executions"]) {
+    await createCollection(name, {});
+    await clearCollection(name).catch(() => undefined);
+  }
+}
+
+async function main(): Promise<void> {
+  await recreateCollections();
+
+  await batchInsert(
+    "runbooks",
+    runbooks.map((runbook) => ({
+      _key: runbook.incidentType,
+      ...runbook,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }))
+  );
+  await batchInsert("services", services);
+  await batchInsert("service_runtime_configs", runtimeConfigs);
+  await batchInsert(
+    "incidents",
+    incidents.map((incident, index) => ({
+      _key: `seed-incident-${String(index + 1).padStart(2, "0")}`,
+      ...incident,
+      detectedAt: incident.detectedAt.toISOString(),
+      resolvedAt: toIso(incident.resolvedAt),
+      postMortemId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }))
+  );
+  await batchInsert(
+    "patterns",
+    patterns.map((pattern) => ({
+      _key: pattern.name,
+      ...pattern,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }))
+  );
+
+  await sendEvent(
+    incidents.slice(0, 5).map((incident, index) => ({
+      sourcetype: "sentinel:postmortem",
+      event: {
+        type: "postmortem",
+        incidentId: `seed-incident-${String(index + 1).padStart(2, "0")}`,
+        title: incident.title,
+        severity: incident.severity,
+        symptoms: incident.symptoms,
+        rootCause: incident.rootCause,
+        resolution: incident.resolution,
+        remediationSteps: incident.remediationSteps,
+        durationMinutes: incident.durationMinutes,
+        preventionActions: ["Review alert thresholds and service ownership routing."],
+        generatedBy: "sentinel"
+      }
+    }))
+  );
+
+  writeLine(`PASSED splunk:seed - inserted 20 incidents, ${serviceNames.length} services, 5 service runtime configs, 8 runbooks, 5 patterns, and 5 HEC post-mortem events`);
+}
+
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  writeLine(`FAILED splunk:seed - ${message}`);
+  process.exitCode = 1;
+});

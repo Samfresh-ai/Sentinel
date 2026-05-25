@@ -14,7 +14,8 @@ const agentEnvSchema = z.object({
   SLACK_DEFAULT_INCIDENT_CHANNEL: z.string().optional(),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("operaiq-remediate"),
-  MONGODB_MCP_SERVER_COMMAND: z.string().optional()
+  MONGODB_MCP_SERVER_COMMAND: z.string().optional(),
+  AGENT_NAME: z.string().min(1).default("OperaIQ")
 });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;

@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { JobsClient } from "@google-cloud/run";
 import { WebClient } from "@slack/web-api";
+import { splunkHecSend, splunkKvPut, splunkKvQuery } from "@operaiq/splunk-mcp";
 import { remediationExecutionsCollection } from "@operaiq/brain";
 import { executeRemediationInputSchema, type ExecuteRemediationResult, type RemediationAction, type RiskLevel } from "@operaiq/shared";
 import { mongoAggregate, mongoFind } from "../mcp.js";
@@ -31,6 +32,14 @@ function isLocalVerifyMode(): boolean {
   return process.env.OPERAIQ_LOCAL_VERIFY?.toLowerCase() === "true";
 }
 
+function isSentinelMode(): boolean {
+  return process.env.SENTINEL_MODE?.toLowerCase() === "true" || getAgentEnv().AGENT_NAME.toLowerCase() === "sentinel";
+}
+
+function agentName(): string {
+  return isSentinelMode() ? "Sentinel" : "OperaIQ";
+}
+
 function cloudRunJobResource(action: RemediationAction): string {
   const env = getAgentEnv();
   const jobName = `${env.CLOUD_RUN_REMEDIATION_JOB_PREFIX}-${action.replaceAll("_", "-")}`;
@@ -46,6 +55,21 @@ function slackClient(): WebClient {
 }
 
 async function serviceConfig(targetService: string): Promise<ServiceExecutionConfig> {
+  if (isSentinelMode()) {
+    const serviceDoc = (await splunkKvQuery("services", { name: targetService }, 1))[0];
+    if (!serviceDoc) {
+      throw new Error(`Service ${targetService} not found in Sentinel Splunk brain`);
+    }
+    const runtimeDoc = (await splunkKvQuery("service_runtime_configs", { serviceName: targetService }, 1))[0];
+    return {
+      name: asString(serviceDoc.name),
+      owners: asStringArray(serviceDoc.owners),
+      incidentChannel: asString(runtimeDoc?.incidentChannel) || getAgentEnv().SLACK_DEFAULT_INCIDENT_CHANNEL || null,
+      adminBaseUrl: asString(runtimeDoc?.adminBaseUrl) || null,
+      cloudRunServiceName: asString(runtimeDoc?.cloudRunServiceName) || null
+    };
+  }
+
   const serviceDocs = await mongoFind({
     database: databaseName(),
     collection: "services",
@@ -94,6 +118,30 @@ async function logExecution(input: {
   requiresHumanApproval: boolean;
   executedAt: Date;
 }): Promise<void> {
+  if (isSentinelMode()) {
+    const document = {
+      action: input.action,
+      targetService: input.targetService,
+      parameters: input.parameters,
+      riskLevel: input.riskLevel,
+      success: input.success,
+      output: input.output,
+      requiresHumanApproval: input.requiresHumanApproval,
+      executedAt: input.executedAt.toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    await splunkKvPut("remediation_executions", null, document);
+    await splunkHecSend({
+      sourcetype: "sentinel:remediation",
+      event: {
+        type: "remediation_execution",
+        ...document,
+        generatedBy: "sentinel"
+      }
+    });
+    return;
+  }
+
   await (await remediationExecutionsCollection()).insertOne({
     _id: new ObjectId(),
     action: input.action,
@@ -121,15 +169,15 @@ async function postSlackMessage(config: ServiceExecutionConfig, input: {
   const env = getAgentEnv();
   const severity = parameterString(input.parameters, "severity") ?? "P2";
   const symptoms = parameterString(input.parameters, "symptoms") ?? "not provided";
-  const reasoning = parameterString(input.parameters, "reasoning") ?? "OperaIQ remediation policy selected this action from current incident context.";
+  const reasoning = parameterString(input.parameters, "reasoning") ?? `${agentName()} remediation policy selected this action from current incident context.`;
   const incidentId = parameterString(input.parameters, "incidentId") ?? "";
   const liveUrl = incidentId ? `${env.PUBLIC_APP_URL}/incidents/${incidentId}` : env.PUBLIC_APP_URL;
   const ownerMentions = config.owners.map((owner) => `<@${owner}>`).join(" ");
   const text = [
-    `*OperaIQ Incident* - ${input.targetService} ${severity}`,
+    `*${agentName()} Incident* - ${input.targetService} ${severity}`,
     `*Status:* In progress`,
     `*Symptoms:* ${symptoms}`,
-    `*OperaIQ reasoning:* ${reasoning}`,
+    `*${agentName()} reasoning:* ${reasoning}`,
     `*Next action:* ${input.action}${input.approvalRequired ? " (approval required)" : " (low risk - executing automatically)"}`,
     `*Track live:* ${liveUrl}`,
     ownerMentions.length > 0 ? `*Owners:* ${ownerMentions}` : ""
