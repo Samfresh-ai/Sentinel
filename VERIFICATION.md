@@ -196,7 +196,7 @@ At 3am, a real SRE opening OperaIQ during a P1 would see the alert tied to remem
 
 ## 6. Sentinel Port Checkpoint
 
-Sentinel is now implemented as a Splunk-native port in the same monorepo, without deleting or replacing the OperaIQ MongoDB/Google path.
+Sentinel is now implemented and live-verified as a Splunk-native port in the same monorepo, without deleting or replacing the OperaIQ MongoDB/Google path.
 
 Changed components:
 
@@ -213,17 +213,28 @@ pnpm typecheck
 pnpm build
 OPERAIQ_AI_PROVIDER=offline pnpm seed:verify
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm agent:smoke-test
+pnpm splunk:setup-check
+pnpm splunk:seed
+pnpm splunk:verify
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:test-tools
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:smoke-test
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm sentinel:e2e
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_LOCAL_PUBSUB_DIRECT=true OPERAIQ_REMEDIATION_WAIT_MS=0 NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm verify:e2e
 ```
 
-Sentinel live verification is blocked by local Splunk setup, not TypeScript/build state. Current observed blocker:
+Live Sentinel proof:
 
 ```text
-pnpm splunk:setup-check
-FAILED splunk:setup-check - missing SPLUNK_USERNAME, SPLUNK_PASSWORD, SPLUNK_HEC_TOKEN
+PASSED splunk:setup-check - REST, KV Store, and HEC are reachable
+PASSED splunk:seed - inserted 20 incidents, 5 services, 5 service runtime configs, 8 runbooks, 5 patterns, and 5 HEC post-mortem events
+PASSED splunk:verify - KV Store counts and SPL post-mortem search passed
+PASSED sentinel:test-tools - all 6 Sentinel tools returned valid non-empty results
+PASSED sentinel:smoke-test - status=resolved, tools=search_similar_incidents, query_splunk_logs, get_service_dependency_graph, get_runbook, execute_remediation, write_postmortem
+PASSED sentinel:e2e - incident=1480e3011b278a91ed1245bb, postmortemId=3d3009a4e09c984dd343c8cb, indexedPostmortems=8
 ```
 
-See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands.
+See `SPLUNK_SETUP.md` and `SENTINEL_VERIFICATION.md` for the exact setup and proof commands. Current known Sentinel gaps: Splunk Hosted Models are not proven on this local license, SPL keyword similarity is lower quality than Atlas Vector Search, and the official Splunk MCP npm package was unavailable so the repo uses a custom REST adapter.
 
 ## Final Status
 
-The local zero-dollar verification path is working and does not require card billing. Slack and the container-size target are now handled. Production OperaIQ is still not complete: remaining blockers are active Google Cloud billing for Vertex/Cloud Run and a public HTTPS API URL for Pub/Sub push. Sentinel is code-complete enough to compile/build, but live e2e is blocked until local Splunk Enterprise is installed/licensed and `.env` has Splunk credentials plus an HEC token. The local modes are explicit and reversible; normal architecture remains the default.
+The local zero-dollar verification path is working and does not require card billing. Slack and the container-size target are handled. Sentinel now passes live local Splunk setup, seed, verify, tool, smoke, and webhook e2e checks, while OperaIQ still passes local `verify:e2e` from the same repo. Production OperaIQ is still not complete: remaining blockers are active Google Cloud billing for Vertex/Cloud Run and a public HTTPS API URL for Pub/Sub push. The local modes are explicit and reversible; normal architecture remains the default.

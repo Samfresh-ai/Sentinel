@@ -34,6 +34,39 @@ sudo /opt/splunk/bin/splunk add licenses /path/to/Splunk.Developer.license -auth
 sudo /opt/splunk/bin/splunk restart
 ```
 
+## Docker Local Path Used for Verification
+
+This repo was verified locally with the official Splunk Docker image:
+
+```bash
+docker pull splunk/splunk:9.4
+docker run -d --name sentinel-splunk \
+  -p 8000:8000 \
+  -p 8088:8088 \
+  -p 8089:8089 \
+  -e SPLUNK_START_ARGS=--accept-license \
+  -e SPLUNK_PASSWORD='<password>' \
+  -e SPLUNK_HEC_TOKEN='<token>' \
+  splunk/splunk:9.4
+```
+
+The image starts HEC with SSL enabled by default. Sentinel's local setup expects HEC at `http://localhost:8088`, so disable HEC SSL after the container is ready:
+
+```bash
+curl -sk -u admin:'<password>' https://localhost:8089/services/data/inputs/http/http \
+  -d enableSSL=0 \
+  -d output_mode=json
+
+docker exec --user splunk sentinel-splunk /opt/splunk/bin/splunk restart
+```
+
+When using Docker, run Splunk CLI commands as the `splunk` user:
+
+```bash
+docker exec --user splunk sentinel-splunk /opt/splunk/bin/splunk create app sentinel -label Sentinel -auth admin:'<password>'
+docker exec --user splunk sentinel-splunk /opt/splunk/bin/splunk add index sentinel -auth admin:'<password>'
+```
+
 ## Create the Sentinel App
 
 ```bash
@@ -107,8 +140,8 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_M
 For API webhook e2e, start the API first:
 
 ```bash
-pnpm --filter @operaiq/api dev
-OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:e2e
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel PORT=3001 node apps/api/dist/server.js
+OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm sentinel:e2e
 ```
 
 ## Splunk Alert Action
