@@ -43,8 +43,15 @@ function agentName(): string {
 
 function cloudRunJobResource(action: RemediationAction): string {
   const env = getAgentEnv();
+  if (!env.GOOGLE_CLOUD_PROJECT_ID) {
+    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when OPERAIQ_REMEDIATION_BACKEND=cloud-run");
+  }
   const jobName = `${env.CLOUD_RUN_REMEDIATION_JOB_PREFIX}-${action.replaceAll("_", "-")}`;
   return `projects/${env.GOOGLE_CLOUD_PROJECT_ID}/locations/${env.GOOGLE_CLOUD_REGION}/jobs/${jobName}`;
+}
+
+function remediationBackend(): "cloud-run" | "admin-endpoint" {
+  return getAgentEnv().OPERAIQ_REMEDIATION_BACKEND;
 }
 
 function slackClient(): WebClient {
@@ -104,11 +111,18 @@ async function serviceConfig(targetService: string, orgId?: string): Promise<Ser
 }
 
 function validateConfigForAction(action: RemediationAction, config: ServiceExecutionConfig): void {
-  if ((action === "scale_service" || action === "restart_pod") && !config.cloudRunServiceName) {
+  const backend = remediationBackend();
+  if (backend === "cloud-run" && (action === "scale_service" || action === "restart_pod") && !config.cloudRunServiceName) {
     throw new Error(`service_runtime_configs.${config.name}.cloudRunServiceName is required for ${action}`);
   }
-  if ((action === "purge_cache" || action === "rotate_connection_pool") && !config.adminBaseUrl) {
-    throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
+  if (
+    (backend === "admin-endpoint" && action !== "notify_team") ||
+    action === "purge_cache" ||
+    action === "rotate_connection_pool"
+  ) {
+    if (!config.adminBaseUrl) {
+      throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
+    }
   }
   if (action === "notify_team" && isLocalVerifyMode()) return;
   if (action === "notify_team" && !config.incidentChannel) {
@@ -241,6 +255,9 @@ function jobEnv(input: {
   parameters: Record<string, string | number>;
 }): Array<{ name: string; value: string }> {
   const env = getAgentEnv();
+  if (!env.GOOGLE_CLOUD_PROJECT_ID) {
+    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when OPERAIQ_REMEDIATION_BACKEND=cloud-run");
+  }
   return [
     { name: "REMEDIATION_ACTION", value: input.action },
     { name: "REMEDIATION_TARGET_SERVICE", value: input.targetService },
@@ -276,6 +293,51 @@ async function dispatchRemediationJob(
   });
   await operation.promise();
   return `Cloud Run remediation job ${jobName} completed for ${config.name}`;
+}
+
+async function dispatchAdminEndpoint(
+  action: RemediationAction,
+  config: ServiceExecutionConfig,
+  parameters: Record<string, string | number>
+): Promise<string> {
+  if (!config.adminBaseUrl) {
+    throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
+  }
+  const env = getAgentEnv();
+  const secret = env.AGENT_TOOL_SECRET ?? env.WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when OPERAIQ_REMEDIATION_BACKEND=admin-endpoint");
+  }
+  const endpoint = `${config.adminBaseUrl.replace(/\/+$/, "")}/admin/remediation`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      "Content-Type": "application/json",
+      "x-operaiq-tool-secret": secret
+    },
+    body: JSON.stringify({
+      action,
+      targetService: config.name,
+      parameters,
+      requestedBy: agentName(),
+      publicAppUrl: env.PUBLIC_APP_URL
+    })
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Admin remediation endpoint ${endpoint} failed with ${response.status}: ${body}`);
+  }
+  if (!body.trim()) {
+    return `Admin remediation endpoint ${endpoint} completed ${action} for ${config.name}`;
+  }
+  try {
+    const parsed = JSON.parse(body) as { output?: unknown; message?: unknown };
+    const output = typeof parsed.output === "string" ? parsed.output : typeof parsed.message === "string" ? parsed.message : body;
+    return `Admin remediation endpoint ${endpoint} completed ${action} for ${config.name}: ${output}`;
+  } catch {
+    return `Admin remediation endpoint ${endpoint} completed ${action} for ${config.name}: ${body}`;
+  }
 }
 
 export async function executeRemediation(input: unknown): Promise<ExecuteRemediationResult> {
@@ -320,7 +382,9 @@ export async function executeRemediation(input: unknown): Promise<ExecuteRemedia
           parameters: parsed.parameters,
           approvalRequired: false
         })
-        : await dispatchRemediationJob(parsed.action, config, parsed.parameters);
+        : remediationBackend() === "admin-endpoint"
+          ? await dispatchAdminEndpoint(parsed.action, config, parsed.parameters)
+          : await dispatchRemediationJob(parsed.action, config, parsed.parameters);
     result = {
       success: true,
       action: parsed.action,

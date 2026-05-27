@@ -1,6 +1,8 @@
-# OperaIQ
+# Sentinel
 
-OperaIQ is an autonomous SRE incident response agent. It accepts alert webhooks, writes incidents into MongoDB Atlas with Vertex AI embeddings, searches past incidents with Atlas Vector Search, maps service dependencies, uses Gemini through Vertex AI for incident reasoning, dispatches low-risk remediation through per-action Cloud Run jobs, streams reasoning over SSE, and writes a post-mortem back into MongoDB.
+Sentinel is a Splunk-native autonomous SRE incident response agent. It ingests app logs through Splunk HEC, lets Splunk saved searches watch for failure patterns, accepts Splunk Alert Action webhooks, investigates with SPL, acts through real remediation backends, streams reasoning in the web app, and writes post-mortems back into Splunk.
+
+This repo still contains the older OperaIQ path, but Sentinel is the production focus. Keep public Sentinel deployments separate from OperaIQ by using `sentinel-*` service names, `SENTINEL_MODE=true`, and the Sentinel deployment docs in `deploy/railway/README.md` or `cloudbuild.sentinel.yaml`.
 
 ## Architecture
 
@@ -68,7 +70,7 @@ The same code also supports any OpenAI-compatible endpoint through `OPERAIQ_GENE
 
 ## Running Sentinel
 
-Sentinel is the Splunk-native port of OperaIQ. It lives alongside OperaIQ in the same monorepo. The agent loop, UI, API server, and Cloud Run remediation jobs stay shared; the changed platform layer is Splunk KV Store, SPL/HEC, and the Splunk Alert Action webhook.
+Sentinel is the Splunk-native path. It lives alongside OperaIQ in the same monorepo, but public deployments should treat it as a separate product. The agent loop, UI, and API server stay shared; the Sentinel platform layer is Splunk KV Store, SPL/HEC, the Splunk Alert Action webhook, and either a Cloud Run or admin-endpoint remediation backend.
 
 After completing the OperaIQ setup, Sentinel needs three additional steps:
 
@@ -109,7 +111,11 @@ Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` /
 
 ### Sentinel Production Readiness
 
-Production Sentinel must be deployed separately from OperaIQ. Use `cloudbuild.sentinel.yaml`; it builds the same shared code but publishes Cloud Run services and jobs under `sentinel-*` names instead of `operaiq-*`:
+Production Sentinel must be deployed separately from OperaIQ.
+
+Preferred non-GCP path for Sentinel web/API: Railway with `deploy/railway/sentinel-api.railway.json` and `deploy/railway/sentinel-web.railway.json`. Use Splunk Cloud or a separately managed Splunk Enterprise target for production Splunk. A Railway Splunk container is demo-only unless it has persistent `/opt/splunk/etc`, persistent `/opt/splunk/var`, backups, a real HEC token, and enough memory/disk for Splunk.
+
+Google Cloud remains supported through `cloudbuild.sentinel.yaml`; it builds the same shared code but publishes Cloud Run services and jobs under `sentinel-*` names instead of `operaiq-*`:
 
 ```bash
 gcloud builds submit --config cloudbuild.sentinel.yaml --substitutions _REGION=us-central1
@@ -120,12 +126,13 @@ Before a public deployment can be considered production-ready:
 - `OPERAIQ_RUNTIME_ENV=production`
 - `SENTINEL_MODE=true`
 - `AGENT_NAME=Sentinel`
-- `CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate`
+- `OPERAIQ_REMEDIATION_BACKEND=admin-endpoint` for Railway/Render/Fly, or `cloud-run` for Google Cloud
+- `CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate` when using the Cloud Run backend
 - `OPERAIQ_LOCAL_VERIFY=false`
 - `DEMO_REMEDIATION_WAIT_MS` unset
 - `OPERAIQ_AI_PROVIDER` and `OPERAIQ_GENERATION_PROVIDER` not `offline`
 - `PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, and `AGENT_TOOL_EXECUTION_BASE_URL` set to public HTTPS Sentinel URLs
-- service runtime configs contain real `adminBaseUrl` or Cloud Run service names for each automatic action
+- service runtime configs contain real `adminBaseUrl` values for the admin-endpoint backend, or Cloud Run service names for the Cloud Run backend
 
 The API refuses production startup when fake-action or demo-timing flags are present. The web app also exposes the current runtime gate on the Brain screen so a user can see `Local verification`, `Demo timing`, `Autonomous ready`, or `Production blocked` instead of mistaking demo proof for prod.
 
@@ -135,7 +142,7 @@ The API refuses production startup when fake-action or demo-timing flags are pre
 | --- | --- |
 | `MONGODB_ATLAS_URI` | Full MongoDB Atlas connection string with credentials. |
 | `MONGODB_DATABASE_NAME` | Database name, default `operaiq`. |
-| `GOOGLE_CLOUD_PROJECT_ID` | Project for Pub/Sub, Cloud Run, and Vertex AI. |
+| `GOOGLE_CLOUD_PROJECT_ID` | Required when using Vertex AI generation/embeddings or the Cloud Run remediation backend. Not required for Sentinel-only Railway deployment with `OPERAIQ_GENERATION_PROVIDER=nvidia` and `OPERAIQ_REMEDIATION_BACKEND=admin-endpoint`. |
 | `GOOGLE_CLOUD_REGION` | Cloud Run region, default `us-central1`. |
 | `VERTEX_AI_LOCATION` | Vertex AI location, default `us-central1`. |
 | `OPERAIQ_AI_PROVIDER` | `vertex` for production, `offline` for local zero-billing verification. |
@@ -169,6 +176,7 @@ The API refuses production startup when fake-action or demo-timing flags are pre
 | `AGENT_NAME` | Agent identity; `OperaIQ` by default, `Sentinel` for Sentinel scripts/runtime. |
 | `SENTINEL_MODE` | Enables Sentinel data-source behavior inside shared tools. |
 | `OPERAIQ_RUNTIME_ENV` | Set `production` for public deployments; production mode blocks local verification and demo timing flags. |
+| `OPERAIQ_REMEDIATION_BACKEND` | `cloud-run` for Google Cloud remediation jobs, or `admin-endpoint` for Railway/Render/Fly deployments that call real service admin endpoints. |
 | `PORT` | API port, default `3001`. |
 | `WEBHOOK_SECRET` | Shared secret checked on alert webhooks. |
 | `AGENT_TOOL_SECRET` | Bearer token for Agent Builder tool execution. Defaults to `WEBHOOK_SECRET` when unset. |

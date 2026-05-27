@@ -326,6 +326,13 @@ The first strict run caught a real parser bug: Splunk scheduled alerts can send 
 
 Production caveat from this proof: the local verification stack records `rotate_connection_pool` instead of dispatching to external infrastructure. That is acceptable for orchestration proof and unacceptable for production closure. Production mode now blocks `OPERAIQ_LOCAL_VERIFY=true`, `DEMO_REMEDIATION_WAIT_MS`, and offline reasoning providers, and the UI shows the runtime gate.
 
+Production remediation path after hardening:
+
+- Google Cloud deployment uses `OPERAIQ_REMEDIATION_BACKEND=cloud-run` and dispatches the existing `sentinel-remediate-*` jobs.
+- Railway/Render/Fly deployment uses `OPERAIQ_REMEDIATION_BACKEND=admin-endpoint` and calls `POST <adminBaseUrl>/admin/remediation` with `Authorization: Bearer <AGENT_TOOL_SECRET>`.
+- Missing `adminBaseUrl`, missing secrets, or a failed admin endpoint is a failed remediation; Sentinel does not mark the action successful.
+- Railway auth was attempted through CLI browserless pairing on 2026-05-27. The local OpenClaw browser was headless and timed out on the Railway login page, and the pairing expired before OAuth could complete. Deployment is blocked on completing Railway login or choosing another account-backed host.
+
 ## Demo Video Clips
 
 Clip 0 - Autonomous Watcher

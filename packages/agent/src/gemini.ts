@@ -8,6 +8,9 @@ let aiClient: GoogleGenAI | undefined;
 function getAiClient(): GoogleGenAI {
   if (!aiClient) {
     const env = getAgentEnv();
+    if (!env.GOOGLE_CLOUD_PROJECT_ID) {
+      throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when generation uses Vertex AI");
+    }
     aiClient = new GoogleGenAI({
       vertexai: true,
       project: env.GOOGLE_CLOUD_PROJECT_ID,

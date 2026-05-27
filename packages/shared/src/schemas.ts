@@ -26,7 +26,7 @@ export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", 
 export const envSchema = z.object({
   MONGODB_ATLAS_URI: z.string().min(1),
   MONGODB_DATABASE_NAME: z.string().min(1).default("operaiq"),
-  GOOGLE_CLOUD_PROJECT_ID: z.string().min(1),
+  GOOGLE_CLOUD_PROJECT_ID: optionalNonEmptyString,
   GOOGLE_CLOUD_REGION: z.string().min(1).default("us-central1"),
   VERTEX_AI_LOCATION: z.string().min(1).default("us-central1"),
   OPERAIQ_AI_PROVIDER: z.enum(["vertex", "offline"]).default("vertex"),
@@ -48,6 +48,8 @@ export const envSchema = z.object({
   SLACK_SIGNING_SECRET: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3001),
   WEBHOOK_SECRET: z.string().min(1),
+  AGENT_TOOL_SECRET: optionalNonEmptyString,
+  OPERAIQ_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:3001")
 });

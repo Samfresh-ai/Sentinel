@@ -12,6 +12,10 @@ function hasEnv(env: NodeJS.ProcessEnv, key: string): boolean {
   return envValue(env, key).length > 0;
 }
 
+function generationProvider(env: NodeJS.ProcessEnv): string {
+  return envValue(env, "OPERAIQ_GENERATION_PROVIDER").toLowerCase() || envValue(env, "OPERAIQ_AI_PROVIDER").toLowerCase() || "vertex";
+}
+
 function isLocalUrl(value: string): boolean {
   if (!value) return false;
   try {
@@ -58,6 +62,28 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   }
   if (envValue(env, "OPERAIQ_GENERATION_PROVIDER").toLowerCase() === "offline") {
     violations.push("OPERAIQ_GENERATION_PROVIDER=offline is deterministic test generation, not production generation");
+  }
+  const provider = generationProvider(env);
+  if (provider === "vertex" && !hasEnv(env, "GOOGLE_CLOUD_PROJECT_ID")) {
+    violations.push("GOOGLE_CLOUD_PROJECT_ID is required when production generation uses Vertex AI");
+  }
+  if (provider === "nvidia" && !hasEnv(env, "NVIDIA_API_KEY")) {
+    violations.push("NVIDIA_API_KEY is required when production generation uses NVIDIA");
+  }
+  if (provider === "openai-compatible") {
+    for (const key of ["OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_MODEL"]) {
+      if (!hasEnv(env, key)) violations.push(`${key} is required when production generation uses an OpenAI-compatible provider`);
+    }
+  }
+  const remediationBackend = envValue(env, "OPERAIQ_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
+  if (remediationBackend !== "cloud-run" && remediationBackend !== "admin-endpoint") {
+    violations.push("OPERAIQ_REMEDIATION_BACKEND must be cloud-run or admin-endpoint");
+  }
+  if (remediationBackend === "cloud-run" && !hasEnv(env, "GOOGLE_CLOUD_PROJECT_ID")) {
+    violations.push("GOOGLE_CLOUD_PROJECT_ID is required when remediation backend is cloud-run");
+  }
+  if (remediationBackend === "admin-endpoint" && !hasEnv(env, "AGENT_TOOL_SECRET") && !hasEnv(env, "WEBHOOK_SECRET")) {
+    violations.push("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when remediation backend is admin-endpoint");
   }
   const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
   if (!publicAppUrl || isLocalUrl(publicAppUrl)) {

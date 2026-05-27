@@ -16,6 +16,18 @@ function booleanEnv(name: string): boolean {
   return process.env[name]?.toLowerCase() === "true";
 }
 
+function envValue(name: string): string {
+  return (process.env[name] ?? "").trim();
+}
+
+function generationProvider(): string {
+  return envValue("OPERAIQ_GENERATION_PROVIDER").toLowerCase() || envValue("OPERAIQ_AI_PROVIDER").toLowerCase() || "vertex";
+}
+
+function remediationBackend(): string {
+  return envValue("OPERAIQ_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
+}
+
 function checkCommand(command: string, args: string[]): { ok: boolean; detail: string } {
   const result = spawnSync(command, args, { encoding: "utf8" });
   if (result.error) {
@@ -104,21 +116,38 @@ async function checkSlack(): Promise<{ ok: boolean; detail: string }> {
 async function main(): Promise<void> {
   const localVerifyMode = booleanEnv("OPERAIQ_LOCAL_VERIFY");
   const offlineAi = process.env.OPERAIQ_AI_PROVIDER === "offline";
+  const sentinelMode = booleanEnv("SENTINEL_MODE");
+  const provider = generationProvider();
+  const backend = remediationBackend();
+  const usesVertex = provider === "vertex";
+  const usesCloudRun = backend === "cloud-run";
+  const usesPubSub = !sentinelMode;
   const productionMode = isProductionRuntime();
   const requiredVariables = [
     "MONGODB_ATLAS_URI",
-    "GOOGLE_CLOUD_PROJECT_ID",
     "WEBHOOK_SECRET",
     "NEXT_PUBLIC_API_URL"
   ];
-  if (!offlineAi) {
+  if (usesVertex || usesCloudRun || usesPubSub) {
+    requiredVariables.push("GOOGLE_CLOUD_PROJECT_ID");
+  }
+  if (provider === "nvidia") {
+    requiredVariables.push("NVIDIA_API_KEY");
+  }
+  if (provider === "openai-compatible") {
+    requiredVariables.push("OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_MODEL");
+  }
+  if (usesVertex) {
     requiredVariables.push("VERTEX_AI_LOCATION");
   }
   if (!localVerifyMode) {
     requiredVariables.push("SLACK_BOT_TOKEN", "SLACK_DEFAULT_INCIDENT_CHANNEL", "SLACK_SIGNING_SECRET");
   }
   if (productionMode) {
-    requiredVariables.push("PUBLIC_APP_URL", "AGENT_TOOL_EXECUTION_BASE_URL", "CLOUD_RUN_REMEDIATION_JOB_PREFIX");
+    requiredVariables.push("PUBLIC_APP_URL", "AGENT_TOOL_EXECUTION_BASE_URL");
+    if (usesCloudRun) {
+      requiredVariables.push("CLOUD_RUN_REMEDIATION_JOB_PREFIX");
+    }
   }
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
   for (const variable of requiredVariables) {
@@ -129,13 +158,23 @@ async function main(): Promise<void> {
     });
   }
 
-  const gcloud = checkCommand("gcloud", ["--version"]);
-  checks.push({ name: "gcloud", ...gcloud });
-  const docker = checkCommand("docker", ["info"]);
-  checks.push({ name: "docker-daemon", ...docker });
+  if (usesCloudRun || usesPubSub || usesVertex) {
+    const gcloud = checkCommand("gcloud", ["--version"]);
+    checks.push({ name: "gcloud", ...gcloud });
+  } else {
+    checks.push({ name: "gcloud", ok: true, detail: "skipped for Sentinel admin-endpoint deployment" });
+  }
+  if (!productionMode) {
+    const docker = checkCommand("docker", ["info"]);
+    checks.push({ name: "docker-daemon", ...docker });
+  }
   checks.push({ name: "mongodb-atlas", ...(await checkMongo()) });
-  checks.push({ name: "pubsub-alert-topic", ...(await checkPubSubTopic(process.env.PUBSUB_ALERT_TOPIC ?? "operaiq-alerts")) });
-  checks.push({ name: "pubsub-events-topic", ...(await checkPubSubTopic(process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events")) });
+  if (usesPubSub) {
+    checks.push({ name: "pubsub-alert-topic", ...(await checkPubSubTopic(process.env.PUBSUB_ALERT_TOPIC ?? "operaiq-alerts")) });
+    checks.push({ name: "pubsub-events-topic", ...(await checkPubSubTopic(process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events")) });
+  } else {
+    checks.push({ name: "pubsub", ok: true, detail: "skipped because Sentinel uses Splunk Alert Action webhooks" });
+  }
   if (offlineAi) {
     checks.push({ name: "vertex-ai", ok: true, detail: "skipped because OPERAIQ_AI_PROVIDER=offline" });
   }
