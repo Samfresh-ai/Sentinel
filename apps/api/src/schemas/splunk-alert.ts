@@ -1,14 +1,16 @@
 import { z } from "zod";
 
+const splunkResultValue = z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]);
+
 export const SplunkAlertPayload = z.object({
   result: z
     .object({
-      sourcetype: z.string().optional(),
-      host: z.string().optional(),
-      source: z.string().optional(),
-      service: z.string().optional(),
-      severity: z.string().optional(),
-      _raw: z.string().optional()
+      sourcetype: splunkResultValue.optional(),
+      host: splunkResultValue.optional(),
+      source: splunkResultValue.optional(),
+      service: splunkResultValue.optional(),
+      severity: splunkResultValue.optional(),
+      _raw: splunkResultValue.optional()
     })
     .passthrough(),
   results_link: z.string().url(),
@@ -16,6 +18,6 @@ export const SplunkAlertPayload = z.object({
   owner: z.string(),
   app: z.string(),
   configuration: z.record(z.string()).optional()
-});
+}).passthrough();
 
 export type SplunkAlertPayload = z.infer<typeof SplunkAlertPayload>;

@@ -1,0 +1,11 @@
+{
+  "setupHasAppChrome": false,
+  "setupHasForm": true,
+  "setupMobileHasAppChrome": false,
+  "splunkInsideApp": true,
+  "screenshots": [
+    "artifacts/sentinel-ui/setup-no-app-chrome-1280.png",
+    "artifacts/sentinel-ui/setup-no-app-chrome-mobile.png",
+    "artifacts/sentinel-ui/splunk-inside-app-1280.png"
+  ]
+}

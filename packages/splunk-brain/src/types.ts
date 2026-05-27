@@ -15,6 +15,7 @@ export interface SplunkHECEvent {
   source?: string;
   sourcetype?: string;
   index?: string;
+  fields?: Record<string, string | number | boolean>;
   event: Record<string, unknown>;
 }
 

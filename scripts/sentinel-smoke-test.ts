@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { insertSentinelIncident } from "@operaiq/splunk-brain";
 import { runSentinelAgent } from "@operaiq/agent";
+import { ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -13,8 +14,10 @@ async function main(): Promise<void> {
   process.env.OPERAIQ_REMEDIATION_WAIT_MS = process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "0";
   process.env.OPERAIQ_AI_PROVIDER = process.env.OPERAIQ_AI_PROVIDER ?? "offline";
 
+  const org = await ensureDemoOrg();
   const detectedAt = new Date();
   const incidentId = await insertSentinelIncident({
+    orgId: org.orgId,
     title: `Sentinel smoke test S3 notification incident ${detectedAt.toISOString()}`,
     severity: "P3",
     status: "open",
@@ -32,6 +35,7 @@ async function main(): Promise<void> {
   const result = await runSentinelAgent(
     {
       incidentId,
+      orgId: org.orgId,
       alert: {
         source: "operaiq",
         title: "S3 bucket permission regression blocked notifications",

@@ -1,24 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { fetchBrainStats, fetchIncidents, type BrainStats, type Incident } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { fetchIncidents, storedToken, type Incident } from "@/lib/api";
 
 function severityClass(severity: Incident["severity"]): string {
-  if (severity === "P1") return "border-red-500 bg-red-500 text-white";
-  if (severity === "P2") return "border-orange-500 bg-orange-500 text-background";
-  if (severity === "P3") return "border-yellow-400 bg-yellow-400 text-background";
-  return "border-border bg-panel text-muted";
+  if (severity === "P1") return "border-critical bg-critical text-white";
+  if (severity === "P2") return "border-warning bg-warning text-background";
+  if (severity === "P3") return "border-caution bg-caution text-background";
+  return "border-border bg-elevated text-muted";
 }
 
 function statusClass(status: Incident["status"]): string {
-  if (status === "open") return "border-red-500 text-red-400";
-  if (status === "in_progress") return "border-accent text-accent";
-  return "border-border text-muted";
+  if (status === "in_progress") return "badge-in-progress border-active text-active";
+  if (status === "resolved") return "border-accent text-accent";
+  if (status === "escalated") return "border-warning text-warning";
+  if (status === "failed") return "border-critical bg-critical text-white";
+  return "border-critical text-critical";
 }
 
 function timeAgo(value: string): string {
@@ -31,17 +30,32 @@ function timeAgo(value: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function truncateTitle(value: string): string {
+  return value.length > 60 ? `${value.slice(0, 57)}...` : value;
+}
+
+function shortServiceName(value: string): string {
+  return value.replace(/-service$/, "").replace(/-cache$/, "").replace(/-main$/, "");
+}
+
+function deriveServices(incident: Incident): string[] {
+  const values = new Set(incident.affectedServices);
+  const searchable = [incident.title, incident.rootCause, incident.resolution, ...incident.symptoms].join(" ").toLowerCase();
+  if (searchable.includes("redis")) values.add("redis-cache");
+  if (searchable.includes("payment")) values.add("payment-service");
+  return Array.from(values).slice(0, 4);
+}
+
 export default function IncidentFeedPage() {
+  const router = useRouter();
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [stats, setStats] = useState<BrainStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function load(): Promise<void> {
     try {
-      const [incidentResponse, statResponse] = await Promise.all([fetchIncidents(), fetchBrainStats()]);
-      setIncidents(incidentResponse.items);
-      setStats(statResponse);
+      const response = await fetchIncidents();
+      setIncidents(response.items);
       setError(null);
     } catch (loadError: unknown) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load incidents");
@@ -51,90 +65,86 @@ export default function IncidentFeedPage() {
   }
 
   useEffect(() => {
+    if (!storedToken()) {
+      router.replace("/setup");
+      return;
+    }
     void load();
     const interval = window.setInterval(() => {
       void load();
-    }, 10_000);
+    }, 2_000);
     return () => window.clearInterval(interval);
   }, []);
 
-  const counts = useMemo(() => {
-    return stats?.statusCounts ?? { open: 0, inProgress: 0, resolvedToday: 0 };
-  }, [stats]);
-
   return (
-    <div className="space-y-5">
-      <section className="flex flex-col justify-between gap-3 border-b border-border pb-5 md:flex-row md:items-end">
+    <div className="min-w-0 space-y-4">
+      <section className="flex flex-col justify-between gap-2 border-b border-border pb-4 md:flex-row md:items-end">
         <div>
-          <h1 className="font-mono text-2xl font-semibold tracking-normal">Incident Feed</h1>
-          <p className="mt-1 text-sm text-muted">Brain: {stats?.incidentCount ?? 0} incidents</p>
+          <h1 className="font-mono text-[16px] uppercase tracking-[0.08em] text-foreground">Incidents</h1>
+          <p className="mt-1 text-[13px] text-muted">Newest alerts, agent status, and resolution state.</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <RefreshCw className="h-4 w-4 text-accent" aria-hidden="true" />
-          Auto-refreshes every 10 seconds
-        </div>
+        <div className="font-mono text-[12px] uppercase tracking-[0.06em] text-muted-deep">poll: 2s</div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3">
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">Open</div>
-            <div className="mt-2 font-mono text-3xl text-red-400">{counts.open}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">In Progress</div>
-            <div className="mt-2 font-mono text-3xl text-accent">{counts.inProgress}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">Resolved Today</div>
-            <div className="mt-2 font-mono text-3xl text-foreground">{counts.resolvedToday}</div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Newest First</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
-          {error ? <div className="p-4 text-sm text-red-400">{error}</div> : null}
-          {loading ? <div className="p-4 text-sm text-muted">Loading incidents</div> : null}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-20">Sev</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead className="hidden md:table-cell">Services</TableHead>
-                <TableHead className="w-32">Status</TableHead>
-                <TableHead className="w-24">Detected</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+      <section className="overflow-hidden border border-border bg-panel">
+        {error ? <div className="border-b border-border px-3 py-2 text-[13px] text-critical">{error}</div> : null}
+        {loading ? <div className="border-b border-border px-3 py-2 font-mono text-[12px] text-muted">Loading incident rows</div> : null}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] table-fixed border-collapse">
+            <thead>
+              <tr className="border-b border-border bg-background font-mono text-[11px] uppercase tracking-[0.06em] text-muted-deep">
+                <th className="w-[52px] px-3 py-2 text-left">Sev</th>
+                <th className="px-3 py-2 text-left">Title</th>
+                <th className="w-[220px] px-3 py-2 text-left">Services</th>
+                <th className="w-[132px] px-3 py-2 text-left">Status</th>
+                <th className="w-[104px] px-3 py-2 text-right">Time</th>
+              </tr>
+            </thead>
+            <tbody>
               {incidents.map((incident) => (
-                <TableRow key={incident.id} className="hover:bg-background">
-                  <TableCell>
-                    <Badge className={severityClass(incident.severity)}>{incident.severity}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/incidents/${incident.id}`} className="block truncate text-foreground hover:text-accent">
-                      {incident.title}
+                <tr key={incident.id} className="border-b border-border bg-panel last:border-b-0 hover:bg-elevated">
+                  <td className="px-3 py-2">
+                    <span
+                      className={`inline-flex h-6 w-7 items-center justify-center whitespace-nowrap border font-mono text-[11px] uppercase leading-none ${severityClass(
+                        incident.severity
+                      )}`}
+                    >
+                      {incident.severity}
+                    </span>
+                  </td>
+                  <td className="min-w-0 px-3 py-2">
+                    <Link href={`/incidents/${incident.id}`} className="block truncate text-[14px] text-foreground hover:text-active">
+                      {truncateTitle(incident.title)}
                     </Link>
-                  </TableCell>
-                  <TableCell className="hidden text-muted md:table-cell">{incident.affectedServices.join(", ")}</TableCell>
-                  <TableCell>
-                    <Badge className={statusClass(incident.status)}>{incident.status}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted">{timeAgo(incident.detectedAt)}</TableCell>
-                </TableRow>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex min-w-0 flex-wrap gap-1">
+                      {deriveServices(incident).map((service) => (
+                        <span key={service} className="bg-elevated px-2 py-1 font-mono text-[11px] text-muted">
+                          {shortServiceName(service)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`inline-flex border px-2 py-1 font-mono text-[11px] uppercase tracking-[0.06em] ${statusClass(incident.status)}`}>
+                      {incident.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-[12px] text-muted-deep">{timeAgo(incident.detectedAt)}</td>
+                </tr>
               ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              {!loading && incidents.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center font-mono text-[12px] text-muted">
+                    No incidents indexed yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

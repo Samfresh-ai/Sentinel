@@ -12,6 +12,7 @@
     "build": "pnpm -r --sort build",
     "typecheck": "pnpm -r --sort typecheck && tsc -p tsconfig.scripts.json --pretty false",
     "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter @operaiq/api dev",
     "setup:pubsub": "tsx --conditions=development scripts/setup-pubsub.ts",
     "preflight": "tsx --conditions=development scripts/preflight.ts",
     "seed": "tsx --conditions=development scripts/seed.ts",
@@ -26,18 +27,28 @@
     "sentinel:test-tools": "tsx --conditions=development scripts/sentinel-test-tools.ts",
     "sentinel:smoke-test": "tsx --conditions=development scripts/sentinel-smoke-test.ts",
     "sentinel:e2e": "tsx --conditions=development scripts/sentinel-e2e.ts",
+    "sentinel:demo:setup": "tsx --conditions=development scripts/demo/create-saved-search.ts",
+    "sentinel:demo:logs": "tsx --conditions=development scripts/demo/generate-logs.ts",
+    "sentinel:demo:seed": "tsx --conditions=development scripts/demo/seed-demo.ts",
+    "sentinel:demo:trigger": "tsx --conditions=development scripts/demo/trigger-alert.ts",
+    "sentinel:demo": "DEMO_REMEDIATION_WAIT_MS=8000 tsx --conditions=development scripts/demo/generate-logs.ts && tsx --conditions=development scripts/demo/seed-demo.ts && DEMO_REMEDIATION_WAIT_MS=8000 tsx --conditions=development scripts/demo/trigger-alert.ts",
+    "sentinel:test-feedback-loop": "OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_VERIFY_WAIT_MS=0 tsx --conditions=development scripts/sentinel-test-feedback-loop.ts",
+    "sentinel:demo:escalate": "OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_VERIFY_WAIT_MS=0 tsx --conditions=development scripts/demo/escalate.ts",
+    "sentinel:demo:learning-loop": "DEMO_REMEDIATION_WAIT_MS=8000 tsx --conditions=development scripts/demo/learning-loop.ts",
+    "sentinel:test-dlq": "OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_VERIFY_WAIT_MS=0 tsx --conditions=development scripts/sentinel-test-dlq.ts",
     "test-webhook": "tsx --conditions=development scripts/test-webhook.ts",
     "verify:e2e": "tsx --conditions=development scripts/verify.ts"
   },
   "devDependencies": {
     "@google-cloud/pubsub": "^4.8.0",
-    "google-auth-library": "^9.15.1",
     "@operaiq/agent": "workspace:*",
     "@operaiq/brain": "workspace:*",
     "@operaiq/shared": "workspace:*",
     "@operaiq/splunk-brain": "workspace:*",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.10",
     "dotenv": "^16.4.7",
+    "google-auth-library": "^9.15.1",
     "mongodb": "^6.12.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
@@ -50,5 +61,9 @@
       "protobufjs",
       "sharp"
     ]
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3"
   }
 }

@@ -15,6 +15,7 @@ function normalizeEvent(event: SplunkHECEvent): SplunkHECEvent {
     source: event.source ?? "sentinel",
     sourcetype: event.sourcetype ?? "_json",
     index: event.index ?? config.SPLUNK_INDEX,
+    ...(event.fields ? { fields: event.fields } : {}),
     event: event.event
   };
 }

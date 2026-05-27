@@ -1,37 +1,68 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchBrainStats, fetchServices, simulateIncident, type BrainStats, type Service } from "@/lib/api";
+import { fetchBrainStats, fetchRuntimeReadiness, fetchServices, simulateIncident, type BrainStats, type RuntimeReadiness, type Service } from "@/lib/api";
+
+function timeAgo(value: string | null | undefined): string {
+  if (!value) return "none";
+  const diffMs = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(0, Math.floor(diffMs / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function severityDotClass(severity: string): string {
+  if (severity === "P1") return "bg-critical";
+  if (severity === "P2") return "bg-warning";
+  if (severity === "P3") return "bg-caution";
+  return "bg-muted";
+}
+
+function formatSeconds(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)}s`;
+}
+
+function runtimeModeLabel(mode: RuntimeReadiness["mode"] | undefined): string {
+  if (mode === "production-blocked") return "Production blocked";
+  if (mode === "autonomous-ready") return "Autonomous ready";
+  if (mode === "local-verification") return "Local verification";
+  if (mode === "demo") return "Demo timing";
+  return "Checking runtime";
+}
 
 export default function BrainPage() {
   const router = useRouter();
   const [stats, setStats] = useState<BrainStats | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeReadiness | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [service, setService] = useState("payment-service");
-  const [severity, setSeverity] = useState<"P1" | "P2" | "P3" | "P4">("P2");
-  const [symptoms, setSymptoms] = useState("database connection timeout\npostgres pool exhausted\ncheckout latency");
+  const [severity, setSeverity] = useState<"P1" | "P2" | "P3" | "P4">("P1");
+  const [symptoms, setSymptoms] = useState("ECONNRESET connection pool latency spike");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([fetchBrainStats(), fetchServices()])
-      .then(([brainStats, serviceResponse]) => {
+    Promise.all([fetchBrainStats(), fetchServices(), fetchRuntimeReadiness()])
+      .then(([brainStats, serviceResponse, runtimeReadiness]) => {
         setStats(brainStats);
+        setRuntime(runtimeReadiness);
         setServices(serviceResponse.items);
-        if (serviceResponse.items[0]) setService(serviceResponse.items[0].name);
+        if (serviceResponse.items.some((item) => item.name === "payment-service")) {
+          setService("payment-service");
+        } else if (serviceResponse.items[0]) {
+          setService(serviceResponse.items[0].name);
+        }
       })
       .catch((loadError: unknown) => {
         setError(loadError instanceof Error ? loadError.message : "Unable to load brain data");
       });
   }, []);
-
-  const maxTypeCount = useMemo(() => {
-    return Math.max(...(stats?.topIncidentTypes.map((item) => item.count) ?? [1]));
-  }, [stats]);
 
   async function submit(): Promise<void> {
     setSubmitting(true);
@@ -40,93 +71,67 @@ export default function BrainPage() {
       const result = await simulateIncident({
         service,
         severity,
-        symptoms: symptoms.split("\n").map((item) => item.trim()).filter(Boolean)
+        symptoms: symptoms
+          .split(/[,\n]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
       });
       router.push(`/incidents/${result.incidentId}`);
     } catch (submitError: unknown) {
       setError(submitError instanceof Error ? submitError.message : "Unable to simulate incident");
-    } finally {
       setSubmitting(false);
     }
   }
 
+  const lastWrite = stats?.recentPostmortems[0]?.createdAt;
+
   return (
-    <div className="space-y-5">
-      <section className="border-b border-border pb-5">
-        <h1 className="font-mono text-2xl font-semibold tracking-normal">Brain Explorer</h1>
-        <p className="mt-1 text-sm text-muted">MongoDB Atlas memory, runbooks, patterns, and post-mortems</p>
+    <div className="min-w-0 space-y-4">
+      {error ? <div className="border border-critical bg-panel px-3 py-2 text-[13px] text-critical">{error}</div> : null}
+
+      <section className={`border bg-panel ${runtime?.mode === "production-blocked" ? "border-critical" : runtime?.mode === "autonomous-ready" ? "border-active" : "border-warning"}`}>
+        <div className="flex flex-col gap-2 px-3 py-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Runtime gate</div>
+            <div className="mt-1 text-[13px] text-foreground">{runtimeModeLabel(runtime?.mode)}</div>
+          </div>
+          <div className="font-mono text-[11px] uppercase tracking-[0.06em] text-muted">
+            {runtime?.production ? "Production" : "Non-production"} · {runtime?.localVerification ? "Fake action enabled" : "Real action path"} · {runtime?.demoTiming ? "Demo timing" : "Live timing"}
+          </div>
+        </div>
+        {runtime?.violations?.length ? (
+          <div className="border-t border-border px-3 py-2 font-mono text-[12px] text-critical">
+            {runtime.violations[0]}
+          </div>
+        ) : null}
       </section>
 
-      {error ? <div className="border border-red-500 p-3 text-sm text-red-300">{error}</div> : null}
-
-      <section className="grid gap-3 md:grid-cols-3">
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">Incidents</div>
-            <div className="mt-2 font-mono text-3xl">{stats?.incidentCount ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">Runbooks</div>
-            <div className="mt-2 font-mono text-3xl">{stats?.runbookCount ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs uppercase text-muted">Patterns</div>
-            <div className="mt-2 font-mono text-3xl">{stats?.patternCount ?? 0}</div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Common Incident Types</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(stats?.topIncidentTypes ?? []).map((item) => (
-              <div key={item.name}>
-                <div className="mb-1 flex justify-between gap-3 text-sm">
-                  <span className="truncate">{item.name}</span>
-                  <span className="font-mono text-muted">{item.count}</span>
-                </div>
-                <div className="h-2 border border-border bg-background">
-                  <div className="h-full bg-accent" style={{ width: `${Math.max(8, (item.count / maxTypeCount) * 100)}%` }} />
-                </div>
-              </div>
+      <section className="border border-border bg-panel">
+        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground">Sentinel brain</div>
+        <div className="space-y-3 p-3">
+          <div className="font-mono text-[13px] text-muted">
+            <span className="text-accent">{stats?.incidentCount ?? "--"}</span> incidents ·{" "}
+            <span className="text-foreground">{stats?.runbookCount ?? "--"}</span> runbooks ·{" "}
+            <span className="text-foreground">{stats?.patternCount ?? "--"}</span> patterns · Last write:{" "}
+            <span className="text-foreground">{timeAgo(lastWrite)}</span>
+          </div>
+          <div className="flex h-3 w-full max-w-[420px] border border-border bg-background">
+            {Array.from({ length: 20 }).map((_, index) => (
+              <span key={index} className={`h-full flex-1 border-r border-background last:border-r-0 ${index < 16 ? "bg-accent" : "bg-elevated"}`} />
             ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Post-mortems</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(stats?.recentPostmortems ?? []).length === 0 ? <div className="text-sm text-muted">No post-mortems yet</div> : null}
-            {(stats?.recentPostmortems ?? []).map((postmortem) => (
-              <div key={postmortem.id} className="border-l border-accent pl-3 text-sm">
-                <div className="truncate font-medium">{postmortem.title}</div>
-                <div className="mt-1 text-muted">{postmortem.summary}</div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Simulate Incident</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-4">
-          <label className="text-sm md:col-span-1">
-            <span className="mb-1 block text-xs uppercase text-muted">Service</span>
+      <section className="border border-border bg-panel">
+        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Simulate incident</div>
+        <div className="grid gap-3 p-3 lg:grid-cols-[180px_140px_minmax(220px,1fr)_170px]">
+          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
+            Service
             <select
               value={service}
               onChange={(event) => setService(event.target.value)}
-              className="h-10 w-full rounded-sm border border-border bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full border border-border bg-background px-2 text-[13px] normal-case tracking-normal text-foreground outline-none focus:border-active"
             >
               {services.map((item) => (
                 <option key={item.id} value={item.name}>
@@ -135,12 +140,12 @@ export default function BrainPage() {
               ))}
             </select>
           </label>
-          <label className="text-sm md:col-span-1">
-            <span className="mb-1 block text-xs uppercase text-muted">Severity</span>
+          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
+            Severity
             <select
               value={severity}
               onChange={(event) => setSeverity(event.target.value as "P1" | "P2" | "P3" | "P4")}
-              className="h-10 w-full rounded-sm border border-border bg-background px-2 text-sm"
+              className="mt-1 h-9 w-full border border-border bg-background px-2 text-[13px] normal-case tracking-normal text-foreground outline-none focus:border-active"
             >
               <option value="P1">P1</option>
               <option value="P2">P2</option>
@@ -148,23 +153,87 @@ export default function BrainPage() {
               <option value="P4">P4</option>
             </select>
           </label>
-          <label className="text-sm md:col-span-2">
-            <span className="mb-1 block text-xs uppercase text-muted">Symptoms</span>
-            <textarea
+          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
+            Symptoms
+            <input
               value={symptoms}
               onChange={(event) => setSymptoms(event.target.value)}
-              rows={4}
-              className="w-full resize-none rounded-sm border border-border bg-background p-2 font-mono text-sm"
+              className="mt-1 h-9 w-full border border-border bg-background px-2 font-mono text-[12px] normal-case tracking-normal text-foreground outline-none focus:border-active"
             />
           </label>
-          <div className="md:col-span-4">
-            <Button onClick={submit} disabled={submitting}>
-              <Send className="h-4 w-4" aria-hidden="true" />
-              {submitting ? "Firing" : "Fire Test Alert"}
-            </Button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={submitting}
+            className="mt-5 inline-flex h-9 items-center justify-center gap-2 border border-active bg-elevated px-3 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground hover:bg-background disabled:cursor-wait disabled:text-muted"
+          >
+            {submitting ? <span className="h-3 w-3 animate-spin rounded-full border border-muted border-t-active" aria-hidden="true" /> : null}
+            {submitting ? "Triggering..." : "Run Simulation →"}
+          </button>
+        </div>
+      </section>
+
+      <section className="border border-border bg-panel">
+        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Brain growth</div>
+        <div className="overflow-x-auto p-3">
+          <div className="flex min-w-[540px] items-start">
+            {(stats?.brainGrowth ?? []).map((item, index, items) => (
+              <Link key={item.incidentId} href={`/incidents/${item.incidentId}`} className="group flex flex-1 items-start">
+                <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
+                  <span
+                    title={`${item.title} · ${formatSeconds(item.resolutionSeconds)} · best match ${item.bestSimilarityScore !== null ? Math.round(item.bestSimilarityScore * 100) : "--"}%`}
+                    className={`h-4 w-4 rounded-full border border-background ${severityDotClass(item.severity)}`}
+                  />
+                  <span className="font-mono text-[11px] text-muted">{item.severity}</span>
+                  <span className="font-mono text-[11px] text-muted-deep">{formatSeconds(item.resolutionSeconds)}</span>
+                </div>
+                {index < items.length - 1 ? <div className="mt-2 h-px flex-1 bg-border" /> : null}
+              </Link>
+            ))}
+            {(stats?.brainGrowth ?? []).length === 0 ? (
+              <div className="font-mono text-[12px] text-muted">No resolved Sentinel incidents yet.</div>
+            ) : null}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
+
+      <section className="overflow-hidden border border-border bg-panel">
+        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Recent post-mortems</div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] table-fixed border-collapse">
+            <thead>
+              <tr className="border-b border-border bg-background font-mono text-[11px] uppercase tracking-[0.06em] text-muted-deep">
+                <th className="px-3 py-2 text-left">Title</th>
+                <th className="w-[160px] px-3 py-2 text-left">Incident</th>
+                <th className="w-[120px] px-3 py-2 text-right">Written</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(stats?.recentPostmortems ?? []).map((postmortem) => (
+                <tr key={postmortem.id} className="border-b border-border last:border-b-0 hover:bg-elevated">
+                  <td className="px-3 py-2">
+                    <div className="truncate text-[13px] text-foreground">{postmortem.title}</div>
+                    <div className="mt-1 truncate text-[12px] text-muted">{postmortem.summary}</div>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[12px] text-mono">
+                    <Link href={`/incidents/${postmortem.incidentId}`} className="hover:text-active">
+                      {postmortem.incidentId.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-[12px] text-muted-deep">{timeAgo(postmortem.createdAt)}</td>
+                </tr>
+              ))}
+              {(stats?.recentPostmortems ?? []).length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-6 text-center font-mono text-[12px] text-muted">
+                    No post-mortems indexed yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

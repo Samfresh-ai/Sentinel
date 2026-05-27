@@ -7,7 +7,9 @@ import type { RunbookResult, RunbookStepResult } from "./get-runbook.js";
 
 export const sentinelGetRunbookInputSchema = z.object({
   incidentDescription: z.string().min(1),
-  affectedServices: z.array(z.string().min(1)).default([])
+  affectedServices: z.array(z.string().min(1)).default([]),
+  rootCauseCandidate: z.string().min(1).nullable().optional(),
+  orgId: z.string().min(1)
 });
 
 function riskLevel(value: unknown): "low" | "medium" | "high" {
@@ -35,6 +37,7 @@ function mapRunbook(doc: Record<string, unknown>, generated: boolean, similarity
     steps,
     applicableServices: asStringArray(doc.applicableServices),
     successCriteria: asString(doc.successCriteria),
+    fallbackAction: typeof doc.fallbackAction === "string" ? doc.fallbackAction : null,
     similarity,
     generated
   };
@@ -47,18 +50,45 @@ function overlapScore(runbook: Record<string, unknown>, affectedServices: string
   return Number((matched / affectedServices.length).toFixed(4));
 }
 
-async function saveGeneratedRunbook(input: { incidentDescription: string; affectedServices: string[] }): Promise<RunbookResult> {
+function textTokens(value: string): Set<string> {
+  return new Set((value.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((token) => token.length > 2));
+}
+
+function descriptionScore(runbook: Record<string, unknown>, incidentDescription: string): number {
+  const incidentTokens = textTokens(incidentDescription);
+  if (incidentTokens.size === 0) return 0;
+  const runbookTokens = textTokens(
+    [
+      asString(runbook.title),
+      asString(runbook.incidentType),
+      asString(runbook.successCriteria),
+      ...asStringArray(runbook.applicableServices),
+      ...(Array.isArray(runbook.steps)
+        ? runbook.steps.flatMap((step) => {
+            if (typeof step !== "object" || step === null || Array.isArray(step)) return [];
+            const doc = step as Record<string, unknown>;
+            return [asString(doc.action), asString(doc.command)];
+          })
+        : [])
+    ].join(" ")
+  );
+  const matched = [...incidentTokens].filter((token) => runbookTokens.has(token)).length;
+  return Number((matched / incidentTokens.size).toFixed(4));
+}
+
+async function saveGeneratedRunbook(input: { incidentDescription: string; affectedServices: string[]; orgId: string }): Promise<RunbookResult> {
   const generated = await generateRunbook(input);
   const now = new Date().toISOString();
   const inserted = await splunkKvPut("runbooks", null, {
     title: generated.title,
     incidentType: generated.incidentType,
     steps: generated.steps,
-    applicableServices: input.affectedServices,
-    successCriteria: generated.successCriteria,
-    createdAt: now,
-    updatedAt: now
-  });
+      applicableServices: input.affectedServices,
+      successCriteria: generated.successCriteria,
+      fallbackAction: "notify_team",
+      createdAt: now,
+      updatedAt: now
+  }, input.orgId);
   return {
     id: inserted.key,
     title: generated.title,
@@ -66,6 +96,7 @@ async function saveGeneratedRunbook(input: { incidentDescription: string; affect
     steps: generated.steps,
     applicableServices: input.affectedServices,
     successCriteria: generated.successCriteria,
+    fallbackAction: "notify_team",
     similarity: 1,
     generated: true
   };
@@ -75,11 +106,17 @@ export async function sentinelGetRunbook(input: unknown): Promise<RunbookResult 
   const parsed = sentinelGetRunbookInputSchema.parse(input);
   invocationStarted("get_runbook", parsed);
   try {
-    const runbooks = parsed.affectedServices.length
-      ? await splunkKvQuery("runbooks", { applicableServices: { $in: parsed.affectedServices } }, 25)
-      : await splunkKvQuery("runbooks", {}, 25);
+    const prioritizedServices = parsed.rootCauseCandidate
+      ? [parsed.rootCauseCandidate, ...parsed.affectedServices.filter((service) => service !== parsed.rootCauseCandidate)]
+      : parsed.affectedServices;
+    const runbooks = prioritizedServices.length
+      ? await splunkKvQuery("runbooks", { applicableServices: { $in: prioritizedServices } }, 25, parsed.orgId)
+      : await splunkKvQuery("runbooks", {}, 25, parsed.orgId);
     const top = runbooks
-      .map((doc) => ({ doc, score: overlapScore(doc, parsed.affectedServices) }))
+      .map((doc) => ({
+        doc,
+        score: overlapScore(doc, prioritizedServices) + descriptionScore(doc, `${parsed.rootCauseCandidate ?? ""}\n${parsed.incidentDescription}`)
+      }))
       .sort((left, right) => right.score - left.score)[0];
     if (top && top.score > 0) {
       const result = mapRunbook(top.doc, false, top.score);

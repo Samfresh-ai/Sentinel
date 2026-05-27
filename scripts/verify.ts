@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { PubSub } from "@google-cloud/pubsub";
+import { DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD, ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -24,6 +25,16 @@ async function requestOk(url: string, init?: RequestInit): Promise<void> {
   if (!response.ok) {
     throw new Error(`${response.status} ${body}`);
   }
+}
+
+async function demoToken(apiUrl: string): Promise<string> {
+  await ensureDemoOrg();
+  const response = await requestJson<{ token: string }>(`${apiUrl}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: DEMO_ADMIN_EMAIL, password: DEMO_ADMIN_PASSWORD })
+  });
+  return response.token;
 }
 
 async function delay(ms: number): Promise<void> {
@@ -66,6 +77,7 @@ async function startAgentEventCollection(): Promise<{
 
 async function main(): Promise<void> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+  const token = await demoToken(apiUrl);
   const secret = process.env.WEBHOOK_SECRET;
   if (!secret) throw new Error("WEBHOOK_SECRET is required");
 
@@ -105,7 +117,7 @@ async function main(): Promise<void> {
       const detail = await requestJson<{
         incident: { status: string; postMortemId: string | null; embeddingDimensions: number; updatedAt: string; createdAt?: string };
         postmortem: unknown;
-      }>(`${apiUrl}/incidents/${webhook.incidentId}`);
+      }>(`${apiUrl}/incidents/${webhook.incidentId}?legacy=operaiq`, { headers: { Authorization: `Bearer ${token}` } });
       if (detail.incident.status === "resolved") {
         finalIncident = detail;
         break;

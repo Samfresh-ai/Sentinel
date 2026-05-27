@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { HOSTED_MODELS_AVAILABLE, generateWithHostedModels } from "@operaiq/splunk-brain/models";
 import { z } from "zod";
 import { getAgentEnv, type AgentEnv } from "./env.js";
 
@@ -23,7 +24,7 @@ function generationProvider(env: AgentEnv): GenerationProvider {
 }
 
 function isOfflineAiProvider(): boolean {
-  return generationProvider(getAgentEnv()) === "offline";
+  return process.env.OPERAIQ_LOCAL_VERIFY?.toLowerCase() === "true" || generationProvider(getAgentEnv()) === "offline";
 }
 
 function extractJson(text: string): unknown {
@@ -159,6 +160,10 @@ async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
 async function generateJsonText(prompt: string): Promise<string> {
   const env = getAgentEnv();
   const provider = generationProvider(env);
+  if (HOSTED_MODELS_AVAILABLE) {
+    return generateWithHostedModels(prompt);
+  }
+
   if (provider === "nvidia" || provider === "openai-compatible") {
     return generateOpenAiCompatibleText(prompt);
   }

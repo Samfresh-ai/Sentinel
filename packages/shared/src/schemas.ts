@@ -11,7 +11,7 @@ const optionalUrl = z.preprocess(
 );
 
 export const severitySchema = z.enum(["P1", "P2", "P3", "P4"]);
-export const incidentStatusSchema = z.enum(["open", "resolved", "in_progress"]);
+export const incidentStatusSchema = z.enum(["open", "resolved", "in_progress", "escalated", "failed"]);
 export const actorSchema = z.enum(["operaiq", "human"]);
 export const remediationActionSchema = z.enum([
   "scale_service",
@@ -21,7 +21,7 @@ export const remediationActionSchema = z.enum([
   "notify_team"
 ]);
 export const riskLevelSchema = z.enum(["low", "medium", "high"]);
-export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", "MAP", "RETRIEVE", "ACT", "CLOSE", "ERROR"]);
+export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", "MAP", "RETRIEVE", "ACT", "VERIFY", "CLOSE", "ESCALATE", "ERROR"]);
 
 export const envSchema = z.object({
   MONGODB_ATLAS_URI: z.string().min(1),

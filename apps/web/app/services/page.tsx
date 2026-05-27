@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchServices, type Service } from "@/lib/api";
 
 export default function ServicesPage() {
@@ -19,65 +18,51 @@ export default function ServicesPage() {
   }, []);
 
   return (
-    <div className="space-y-5">
-      <section className="border-b border-border pb-5">
-        <h1 className="font-mono text-2xl font-semibold tracking-normal">Services</h1>
-        <p className="mt-1 text-sm text-muted">Dependency graph from MongoDB service memory</p>
+    <div className="min-w-0 space-y-4">
+      <section className="border-b border-border pb-4">
+        <h1 className="font-mono text-[16px] uppercase tracking-[0.08em] text-foreground">Services</h1>
+        <p className="mt-1 text-[13px] text-muted">Dependency graph and fragile points used by the agent.</p>
       </section>
 
-      {error ? <div className="border border-red-500 p-3 text-sm text-red-300">{error}</div> : null}
+      {error ? <div className="border border-critical bg-panel px-3 py-2 text-[13px] text-critical">{error}</div> : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="overflow-hidden border border-border bg-panel">
         {services.map((service) => {
           const open = expanded === service.id;
           return (
-            <Card key={service.id}>
+            <div key={service.id} className="border-b border-border last:border-b-0">
               <button
                 type="button"
                 onClick={() => setExpanded(open ? null : service.id)}
-                className="flex w-full items-center justify-between border-b border-border px-4 py-3 text-left"
+                className="grid w-full grid-cols-[minmax(180px,1fr)_minmax(120px,0.6fr)_90px_100px_74px_26px] items-center gap-3 px-3 py-3 text-left hover:bg-elevated"
               >
-                <div>
-                  <CardTitle className="text-foreground">{service.name}</CardTitle>
-                  <div className="mt-1 text-xs text-muted">{service.team}</div>
-                </div>
-                {open ? <ChevronDown className="h-4 w-4 text-accent" /> : <ChevronRight className="h-4 w-4 text-muted" />}
+                <span className="truncate text-[14px] text-foreground">{service.name}</span>
+                <span className="truncate font-mono text-[12px] text-muted">{service.team}</span>
+                <span className="font-mono text-[12px] text-mono">{service.language}</span>
+                <span className="font-mono text-[12px] text-muted">SLA: {service.slaMs}ms</span>
+                <span className="font-mono text-[12px] text-muted">deps: {service.dependencies.length}</span>
+                {open ? <ChevronDown className="h-4 w-4 text-active" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 text-muted" aria-hidden="true" />}
               </button>
-              <CardContent className="space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-3">
+              <div className={`service-details ${open ? "open" : ""}`}>
+                <div className="grid gap-4 border-t border-border px-3 py-3 text-[13px] text-muted md:grid-cols-3">
                   <div>
-                    <div className="text-xs uppercase text-muted">Dependencies</div>
-                    <div className="mt-1 font-mono text-xl">{service.dependencies.length}</div>
+                    <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-deep">Depends on</div>
+                    <div>{service.dependencies.length ? service.dependencies.join(", ") : "None"}</div>
                   </div>
                   <div>
-                    <div className="text-xs uppercase text-muted">SLA</div>
-                    <div className="mt-1 font-mono text-xl">{service.slaMs}ms</div>
+                    <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-deep">Dependents</div>
+                    <div>{service.dependents.length ? service.dependents.join(", ") : "None"}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.06em] text-muted-deep">Fragile points</div>
+                    <div>{service.knownFragilePoints.length ? service.knownFragilePoints.join(", ") : "None recorded"}</div>
                   </div>
                 </div>
-                {open ? (
-                  <div className="space-y-3 border-t border-border pt-3">
-                    <div>
-                      <div className="mb-1 text-xs uppercase text-muted">Depends On</div>
-                      <div className="text-muted">{service.dependencies.length ? service.dependencies.join(", ") : "None"}</div>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-xs uppercase text-muted">Dependents</div>
-                      <div className="text-muted">{service.dependents.length ? service.dependents.join(", ") : "None"}</div>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-xs uppercase text-muted">Fragile Points</div>
-                      <ul className="list-inside list-disc text-muted">
-                        {service.knownFragilePoints.map((point) => (
-                          <li key={point}>{point}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           );
         })}
+        {services.length === 0 ? <div className="px-3 py-6 text-center font-mono text-[12px] text-muted">No services indexed yet.</div> : null}
       </section>
     </div>
   );

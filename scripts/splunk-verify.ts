@@ -1,12 +1,14 @@
 import "dotenv/config";
 import { countDocuments, runSearch } from "@operaiq/splunk-brain";
 import { incidents, patterns, runbooks } from "./seed.js";
+import { ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
 async function main(): Promise<void> {
+  const org = await ensureDemoOrg();
   const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
   const expected = [
     {
@@ -22,13 +24,13 @@ async function main(): Promise<void> {
   ];
   const failures: string[] = [];
   for (const { collection, label, count, filter } of expected) {
-    const seeded = await countDocuments(collection, filter);
-    const total = await countDocuments(collection);
+    const seeded = await countDocuments(collection, filter, { orgId: org.orgId });
+    const total = await countDocuments(collection, {}, { orgId: org.orgId });
     if (seeded !== count) failures.push(`${collection}: expected ${count} seeded documents, found ${seeded}`);
     writeLine(`${seeded === count ? "PASSED" : "FAILED"} splunk-kv-${label} - seeded=${seeded}/${count} total=${total}`);
   }
 
-  const results = await runSearch("search index=sentinel sourcetype=sentinel:postmortem | head 5", { maxResults: 5 });
+  const results = await runSearch(`search index=sentinel sourcetype=sentinel:postmortem orgId=${org.orgId} | head 5`, { maxResults: 5 });
   writeLine(`CHECK splunk-postmortem-search - resultCount=${results.length}`);
   if (results.length === 0) failures.push("expected at least one sentinel:postmortem event in the sentinel index");
 

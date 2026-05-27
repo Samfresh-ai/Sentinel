@@ -1,0 +1,100 @@
+export type RuntimeMode = "local-verification" | "demo" | "autonomous-ready" | "production-blocked";
+
+function envValue(env: NodeJS.ProcessEnv, key: string): string {
+  return (env[key] ?? "").trim();
+}
+
+function booleanEnv(env: NodeJS.ProcessEnv, key: string): boolean {
+  return envValue(env, key).toLowerCase() === "true";
+}
+
+function hasEnv(env: NodeJS.ProcessEnv, key: string): boolean {
+  return envValue(env, key).length > 0;
+}
+
+function isLocalUrl(value: string): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+export function isLocalVerificationMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return booleanEnv(env, "OPERAIQ_LOCAL_VERIFY");
+}
+
+export function isDemoTimingMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return hasEnv(env, "DEMO_REMEDIATION_WAIT_MS");
+}
+
+export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (envValue(env, "OPERAIQ_RUNTIME_ENV").toLowerCase() === "production") return true;
+  if (booleanEnv(env, "SENTINEL_PRODUCTION_MODE")) return true;
+  if (envValue(env, "NODE_ENV").toLowerCase() !== "production") return false;
+  const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
+  const apiUrl = envValue(env, "NEXT_PUBLIC_API_URL");
+  return !(publicAppUrl.length > 0 && apiUrl.length > 0 && isLocalUrl(publicAppUrl) && isLocalUrl(apiUrl));
+}
+
+export function canUseLocalVerificationEffect(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !isProductionRuntime(env) && (isLocalVerificationMode(env) || isDemoTimingMode(env));
+}
+
+export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!isProductionRuntime(env)) return [];
+
+  const violations: string[] = [];
+  if (isLocalVerificationMode(env)) {
+    violations.push("OPERAIQ_LOCAL_VERIFY=true records remediation instead of dispatching real action");
+  }
+  if (isDemoTimingMode(env)) {
+    violations.push("DEMO_REMEDIATION_WAIT_MS is set and can alter demo verification timing");
+  }
+  if (envValue(env, "OPERAIQ_AI_PROVIDER").toLowerCase() === "offline") {
+    violations.push("OPERAIQ_AI_PROVIDER=offline is deterministic test reasoning, not production reasoning");
+  }
+  if (envValue(env, "OPERAIQ_GENERATION_PROVIDER").toLowerCase() === "offline") {
+    violations.push("OPERAIQ_GENERATION_PROVIDER=offline is deterministic test generation, not production generation");
+  }
+  const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
+  if (!publicAppUrl || isLocalUrl(publicAppUrl)) {
+    violations.push("PUBLIC_APP_URL must be the public Sentinel web URL");
+  }
+  const apiUrl = envValue(env, "NEXT_PUBLIC_API_URL");
+  if (!apiUrl || isLocalUrl(apiUrl)) {
+    violations.push("NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
+  }
+  return violations;
+}
+
+export function runtimeReadiness(env: NodeJS.ProcessEnv = process.env): {
+  mode: RuntimeMode;
+  production: boolean;
+  localVerification: boolean;
+  demoTiming: boolean;
+  violations: string[];
+} {
+  const production = isProductionRuntime(env);
+  const localVerification = isLocalVerificationMode(env);
+  const demoTiming = isDemoTimingMode(env);
+  const violations = productionReadinessViolations(env);
+  const mode: RuntimeMode = production
+    ? violations.length > 0
+      ? "production-blocked"
+      : "autonomous-ready"
+    : localVerification
+      ? "local-verification"
+      : demoTiming
+        ? "demo"
+        : "autonomous-ready";
+  return { mode, production, localVerification, demoTiming, violations };
+}
+
+export function assertProductionSafeRuntime(component: string, env: NodeJS.ProcessEnv = process.env): void {
+  const violations = productionReadinessViolations(env);
+  if (violations.length === 0) return;
+  throw new Error(`${component} cannot start in production mode: ${violations.join("; ")}`);
+}

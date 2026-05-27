@@ -48,6 +48,12 @@ export function addAgentEventHandler(handler: EventHandler): () => void {
   };
 }
 
+export function dispatchAgentEvent(event: AgentEvent): void {
+  for (const handler of eventHandlers) {
+    handler(event);
+  }
+}
+
 export async function startAgentEventsSubscription(): Promise<void> {
   if (eventsSubscriptionStarted) return;
   eventsSubscriptionStarted = true;
@@ -62,9 +68,7 @@ export async function startAgentEventsSubscription(): Promise<void> {
   subscription.on("message", (message: Message) => {
     try {
       const parsed = agentEventSchema.parse(JSON.parse(message.data.toString("utf8")));
-      for (const handler of eventHandlers) {
-        handler(parsed);
-      }
+      dispatchAgentEvent(parsed);
       message.ack();
     } catch {
       message.nack();

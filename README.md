@@ -78,7 +78,22 @@ After completing the OperaIQ setup, Sentinel needs three additional steps:
 
 Sentinel listens at `POST /webhooks/splunk-alert`. OperaIQ still listens at `POST /webhooks/alert`. Both can run from the same `docker compose up --build` process once their backing services are configured.
 
-Sentinel verification commands:
+Sentinel has three intentionally separate proof phases:
+
+1. Demo fast path: `pnpm sentinel:demo`
+   - Purpose: quick judge/operator reproduction.
+   - Path: sends logs, seeds demo brain, then posts a Splunk-shaped webhook directly.
+   - Mode: local verification is allowed; it proves the Sentinel loop and UI, not real infrastructure remediation.
+2. Autonomous demo: `pnpm sentinel:demo:setup` then `pnpm sentinel:demo:logs`
+   - Purpose: prove Splunk watches without a manual trigger.
+   - Path: app logs go to HEC, Splunk saved search runs on schedule, Splunk fires `/webhooks/splunk-alert`, Sentinel acts.
+   - Mode: local verification is allowed; the watcher/webhook path is real, the remediation dispatch may still be recorded locally.
+3. Strict human-flow run
+   - Purpose: acceptance proof for `[app] -> Splunk -> saved search -> webhook -> Sentinel ACT/VERIFY/CLOSE`.
+   - Path: fresh org/project, direct Splunk REST/HEC setup, real saved-search scheduler, no `pnpm sentinel:*` shortcut.
+   - Latest proof: `artifacts/human-flow/splunk-autonomous-flow-20260527182942.json`.
+
+Sentinel verification commands for local development:
 
 ```bash
 pnpm splunk:setup-check
@@ -90,7 +105,29 @@ OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_M
 OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:e2e
 ```
 
-Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` / `llmgenerate` names. Install AI Toolkit 5.7.x and the matching Python for Scientific Computing add-on, then run `pnpm splunk:hosted-models-check`. If that check still fails, Sentinel uses the configured generation fallback for runbook and post-mortem fields. The exact current blocker is documented in `SENTINEL_VERIFICATION.md`; the Splunk-native parts remain KV Store memory, SPL investigation, HEC indexing, and Splunk Alert Action triggering.
+Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` / `llmgenerate` names. Sentinel probes Hosted Models at startup with `probeHostedModels()`: local Splunk Enterprise uses Gemini fallback, while Splunk Cloud Platform can activate Hosted Models automatically when the probe succeeds. The Splunk-native parts remain KV Store memory, SPL investigation, HEC indexing, and Splunk Alert Action triggering.
+
+### Sentinel Production Readiness
+
+Production Sentinel must be deployed separately from OperaIQ. Use `cloudbuild.sentinel.yaml`; it builds the same shared code but publishes Cloud Run services and jobs under `sentinel-*` names instead of `operaiq-*`:
+
+```bash
+gcloud builds submit --config cloudbuild.sentinel.yaml --substitutions _REGION=us-central1
+```
+
+Before a public deployment can be considered production-ready:
+
+- `OPERAIQ_RUNTIME_ENV=production`
+- `SENTINEL_MODE=true`
+- `AGENT_NAME=Sentinel`
+- `CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate`
+- `OPERAIQ_LOCAL_VERIFY=false`
+- `DEMO_REMEDIATION_WAIT_MS` unset
+- `OPERAIQ_AI_PROVIDER` and `OPERAIQ_GENERATION_PROVIDER` not `offline`
+- `PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, and `AGENT_TOOL_EXECUTION_BASE_URL` set to public HTTPS Sentinel URLs
+- service runtime configs contain real `adminBaseUrl` or Cloud Run service names for each automatic action
+
+The API refuses production startup when fake-action or demo-timing flags are present. The web app also exposes the current runtime gate on the Brain screen so a user can see `Local verification`, `Demo timing`, `Autonomous ready`, or `Production blocked` instead of mistaking demo proof for prod.
 
 ## Environment
 
@@ -131,6 +168,7 @@ Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` /
 | `SPLUNK_INDEX` | Splunk event index for Sentinel, default `sentinel`. |
 | `AGENT_NAME` | Agent identity; `OperaIQ` by default, `Sentinel` for Sentinel scripts/runtime. |
 | `SENTINEL_MODE` | Enables Sentinel data-source behavior inside shared tools. |
+| `OPERAIQ_RUNTIME_ENV` | Set `production` for public deployments; production mode blocks local verification and demo timing flags. |
 | `PORT` | API port, default `3001`. |
 | `WEBHOOK_SECRET` | Shared secret checked on alert webhooks. |
 | `AGENT_TOOL_SECRET` | Bearer token for Agent Builder tool execution. Defaults to `WEBHOOK_SECRET` when unset. |
@@ -219,7 +257,7 @@ Agent Builder tool execution:
 
 Tool POST requests require `Authorization: Bearer <AGENT_TOOL_SECRET>` or `x-operaiq-tool-secret: <AGENT_TOOL_SECRET>`.
 
-`packages/agent/src/agent-config.ts` emits the tool configuration and deployment command scaffold, and `cloudbuild.yaml` builds/deploys API, web, and remediation job images. In the current verification workspace, `gcloud` is installed and Pub/Sub/Vertex APIs were enabled on a fresh project, but Cloud Run deployment remains blocked until billing is enabled.
+`packages/agent/src/agent-config.ts` emits the tool configuration and deployment command scaffold. `cloudbuild.yaml` deploys OperaIQ services under `operaiq-*`; `cloudbuild.sentinel.yaml` deploys Sentinel services under `sentinel-*` so the public Sentinel deployment is not mixed with OperaIQ. In the current verification workspace, `gcloud` is installed and Pub/Sub/Vertex APIs were enabled on a fresh project, but Cloud Run deployment remains blocked until billing is enabled.
 
 ## PagerDuty and Datadog
 
@@ -229,7 +267,7 @@ Datadog: create a monitor webhook integration pointing to `https://<api-host>/we
 
 ## Current Verification State
 
-No live deployment URL was created in this workspace. Atlas is configured, Pub/Sub topics exist, and Slack is wired locally: the bot token validates as `operaiq` in workspace `OperaIQ`, `#all-operaiq` is reachable, a test message posted successfully, and the signing secret is stored in `.env` for interaction verification. Production Vertex calls and Cloud Run deployment remain blocked until the Google Cloud project has active billing. Pub/Sub push setup still needs a public HTTPS API URL ending in `/pubsub/alerts`.
+No live deployment URL was created in this workspace. Atlas is configured, Pub/Sub topics exist, and Slack is wired locally: the bot token validates as `operaiq` in workspace `OperaIQ`, `#all-operaiq` is reachable, a test message posted successfully, and the signing secret is stored in `.env` for interaction verification. Sentinel's separate Cloud Run config is ready in `cloudbuild.sentinel.yaml`, but the configured Google Cloud project `operaiq-1779637729` currently reports `billingEnabled=false`, so a public Sentinel URL cannot be created from this workspace yet. Pub/Sub push setup still needs a public HTTPS Sentinel API URL ending in `/pubsub/alerts`.
 
 ## Production Notes
 

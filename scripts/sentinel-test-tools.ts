@@ -8,6 +8,7 @@ import {
   sentinelSearchSimilarIncidents,
   sentinelWritePostmortem
 } from "@operaiq/agent";
+import { ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -20,8 +21,10 @@ async function main(): Promise<void> {
   process.env.OPERAIQ_REMEDIATION_WAIT_MS = process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "0";
   process.env.OPERAIQ_AI_PROVIDER = process.env.OPERAIQ_AI_PROVIDER ?? "offline";
 
+  const org = await ensureDemoOrg();
   const detectedAt = new Date(Date.now() - 5 * 60_000);
   const incidentId = await insertSentinelIncident({
+    orgId: org.orgId,
     title: `Sentinel tool test incident ${detectedAt.toISOString()}`,
     severity: "P3",
     status: "open",
@@ -38,6 +41,7 @@ async function main(): Promise<void> {
 
   const similar = await sentinelSearchSimilarIncidents({
     symptoms: ["database connection timeout", "postgres pool exhausted"],
+    orgId: org.orgId,
     limit: 5
   });
   if (similar.length === 0) throw new Error("search_similar_incidents returned no results");
@@ -49,12 +53,13 @@ async function main(): Promise<void> {
   });
   if (logs.eventCount === 0) throw new Error("query_splunk_logs returned no events");
 
-  const graph = await sentinelGetServiceDependencyGraph({ serviceName: "payment-service" });
+  const graph = await sentinelGetServiceDependencyGraph({ serviceName: "payment-service", orgId: org.orgId });
   if (!graph || graph.service.name !== "payment-service") throw new Error("get_service_dependency_graph returned invalid graph");
 
   const runbook = await sentinelGetRunbook({
     incidentDescription: "S3 AccessDenied template asset reads failing notification send errors",
-    affectedServices: ["notification-service"]
+    affectedServices: ["notification-service"],
+    orgId: org.orgId
   });
   if (!runbook || runbook.steps.length === 0) throw new Error("get_runbook returned no runbook");
 
@@ -64,6 +69,7 @@ async function main(): Promise<void> {
     parameters: {
       riskLevel: "low",
       severity: "P3",
+      orgId: org.orgId,
       symptoms: "S3 AccessDenied, notification send errors",
       reasoning: "Sentinel tool isolation test for low-risk notification.",
       incidentId
@@ -73,6 +79,7 @@ async function main(): Promise<void> {
 
   const postmortem = await sentinelWritePostmortem({
     incidentId,
+    orgId: org.orgId,
     timeline: [
       {
         timestamp: detectedAt.toISOString(),

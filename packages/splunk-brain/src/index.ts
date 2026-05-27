@@ -1,4 +1,5 @@
 export * from "./client.js";
+export * from "./audit.js";
 export * from "./env.js";
 export * from "./hec.js";
 export * from "./kvstore.js";

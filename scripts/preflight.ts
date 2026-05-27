@@ -2,6 +2,7 @@ import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { MongoClient } from "mongodb";
 import { PubSub } from "@google-cloud/pubsub";
+import { isProductionRuntime, productionReadinessViolations } from "@operaiq/shared";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -103,6 +104,7 @@ async function checkSlack(): Promise<{ ok: boolean; detail: string }> {
 async function main(): Promise<void> {
   const localVerifyMode = booleanEnv("OPERAIQ_LOCAL_VERIFY");
   const offlineAi = process.env.OPERAIQ_AI_PROVIDER === "offline";
+  const productionMode = isProductionRuntime();
   const requiredVariables = [
     "MONGODB_ATLAS_URI",
     "GOOGLE_CLOUD_PROJECT_ID",
@@ -114,6 +116,9 @@ async function main(): Promise<void> {
   }
   if (!localVerifyMode) {
     requiredVariables.push("SLACK_BOT_TOKEN", "SLACK_DEFAULT_INCIDENT_CHANNEL", "SLACK_SIGNING_SECRET");
+  }
+  if (productionMode) {
+    requiredVariables.push("PUBLIC_APP_URL", "AGENT_TOOL_EXECUTION_BASE_URL", "CLOUD_RUN_REMEDIATION_JOB_PREFIX");
   }
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
   for (const variable of requiredVariables) {
@@ -139,6 +144,9 @@ async function main(): Promise<void> {
   } else if (hasEnv("SLACK_BOT_TOKEN") && hasEnv("SLACK_DEFAULT_INCIDENT_CHANNEL")) {
     checks.push({ name: "slack", ...(await checkSlack()) });
   }
+  for (const violation of productionReadinessViolations()) {
+    checks.push({ name: "production-readiness", ok: false, detail: violation });
+  }
 
   let failed = 0;
   for (const check of checks) {
@@ -152,6 +160,8 @@ async function main(): Promise<void> {
   writeLine(
     localVerifyMode || offlineAi
       ? "PASSED preflight - local verification prerequisites are reachable"
+      : productionMode
+        ? "PASSED preflight - production Sentinel prerequisites are reachable"
       : "PASSED preflight - all required local and cloud prerequisites are reachable"
   );
 }

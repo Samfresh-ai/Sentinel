@@ -6,6 +6,7 @@ import {
   sendEvent
 } from "@operaiq/splunk-brain";
 import { incidents, patterns, runbooks } from "./seed.js";
+import { ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -125,27 +126,30 @@ function toIso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
 }
 
-async function recreateCollections(): Promise<void> {
-  for (const name of ["incidents", "services", "service_runtime_configs", "runbooks", "postmortems", "patterns", "remediation_executions"]) {
+async function recreateCollections(orgId: string): Promise<void> {
+  for (const name of ["incidents", "services", "service_runtime_configs", "runbooks", "postmortems", "patterns", "audit_log", "rate_limit_windows", "dead_letter", "remediation_executions"]) {
     await createCollection(name, {});
-    await clearCollection(name).catch(() => undefined);
+    await clearCollection(name, { orgId }).catch(() => undefined);
   }
 }
 
 async function main(): Promise<void> {
-  await recreateCollections();
+  const org = await ensureDemoOrg();
+  await recreateCollections(org.orgId);
 
   await batchInsert(
     "runbooks",
     runbooks.map((runbook) => ({
       _key: runbook.incidentType,
       ...runbook,
+      fallbackAction: runbook.incidentType.includes("redis") ? "restart_pod" : "notify_team",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }))
+    })),
+    { orgId: org.orgId }
   );
-  await batchInsert("services", services);
-  await batchInsert("service_runtime_configs", runtimeConfigs);
+  await batchInsert("services", services, { orgId: org.orgId });
+  await batchInsert("service_runtime_configs", runtimeConfigs, { orgId: org.orgId });
   await batchInsert(
     "incidents",
     incidents.map((incident, index) => ({
@@ -156,7 +160,8 @@ async function main(): Promise<void> {
       postMortemId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }))
+    })),
+    { orgId: org.orgId }
   );
   await batchInsert(
     "patterns",
@@ -165,7 +170,8 @@ async function main(): Promise<void> {
       ...pattern,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    }))
+    })),
+    { orgId: org.orgId }
   );
 
   await sendEvent(
@@ -173,6 +179,7 @@ async function main(): Promise<void> {
       sourcetype: "sentinel:postmortem",
       event: {
         type: "postmortem",
+        orgId: org.orgId,
         incidentId: `seed-incident-${String(index + 1).padStart(2, "0")}`,
         title: incident.title,
         severity: incident.severity,

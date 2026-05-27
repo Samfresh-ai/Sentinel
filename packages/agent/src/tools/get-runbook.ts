@@ -35,6 +35,7 @@ export interface RunbookResult {
   steps: RunbookStepResult[];
   applicableServices: string[];
   successCriteria: string;
+  fallbackAction?: string | null;
   similarity: number;
   generated: boolean;
 }
@@ -64,6 +65,7 @@ function mapRunbook(doc: Record<string, unknown>, generated: boolean): RunbookRe
     steps,
     applicableServices: asStringArray(doc.applicableServices),
     successCriteria: asString(doc.successCriteria),
+    fallbackAction: typeof doc.fallbackAction === "string" ? doc.fallbackAction : null,
     similarity: asNumber(doc.score, generated ? 1 : 0),
     generated
   };
@@ -104,6 +106,7 @@ async function saveGeneratedRunbook(input: {
     steps: generated.steps,
     applicableServices: input.affectedServices,
     successCriteria: generated.successCriteria,
+    fallbackAction: null,
     similarity: 1,
     generated: true
   };

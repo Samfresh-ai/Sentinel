@@ -131,6 +131,31 @@ pnpm splunk:seed
 pnpm splunk:verify
 ```
 
+## Native Sentinel Dashboard
+
+Deploy the native Simple XML dashboard into the running Splunk container:
+
+```bash
+docker cp apps/splunk-app/sentinel/default sentinel-splunk:/opt/splunk/etc/apps/sentinel/
+docker exec sentinel-splunk /opt/splunk/bin/splunk restart
+```
+
+Verify the view is registered:
+
+```bash
+curl -k -u admin:$SPLUNK_PASSWORD \
+  "https://localhost:8089/servicesNS/admin/sentinel/data/ui/views/sentinel_overview" \
+  -o /dev/null -w "%{http_code}"
+```
+
+Expected response: `200`.
+
+Open the dashboard:
+
+```text
+http://localhost:8000/app/sentinel/sentinel_overview
+```
+
 ## Splunk Hosted Models
 
 Hosted Models are not available from plain Splunk Enterprise alone. Splunk documents the LLM path through the AI Toolkit `ai` SPL command.
@@ -141,14 +166,14 @@ Required before claiming the Hosted Models prize lane:
 2. Install the matching Python for Scientific Computing add-on. For AI Toolkit 5.7.4, Splunk documents PSC 4.3.2.
 3. Restart Splunk.
 4. Confirm the `ai` SPL command exists.
-5. Confirm the current user can see the Splunk Hosted Models provider in AI Toolkit Connections. Splunk docs say this requires `list_tokens_scs`.
+5. Confirm the current user can see the Splunk Hosted Models provider in AI Toolkit Connections on Splunk Cloud Platform.
 6. Run:
 
 ```bash
 pnpm splunk:hosted-models-check
 ```
 
-Current local blocker on 2026-05-25: AI Toolkit 5.7.4 and PSC 4.3.2 are installed, and the `ai` command is available. Hosted Models still cannot be invoked because local Splunk Enterprise returns `404 Not Found` for `/services/authorization/scs_tokens?principalId=slim&scope=tenant`, so AI Toolkit cannot fetch Splunk Cloud Services models into its LLM connection config.
+Current local behavior: AI Toolkit 5.7.4 and PSC 4.3.2 are installed, and the `ai` command is available. `probeHostedModels()` returns false on local Enterprise Developer License, so Sentinel routes generated reasoning through Gemini fallback. This is the intended capability check for local Enterprise versus Splunk Cloud Platform.
 
 Latest blocker proof:
 
@@ -158,8 +183,7 @@ PASSED splunk-ai-toolkit-app - AI Toolkit app is installed
 PASSED splunk-psc-add-on - Python for Scientific Computing add-on is installed
 PASSED splunk-ai-command - `ai` search command is available
 CHECK splunk-legacy-llm-commands - found=none
-FAILED splunk-scs-token-endpoint - status=404 message=Not Found
-FAILED splunk-hosted-models-search - Error in 'ai' command: No configuration found for provider: "Splunk Hosted Models" and model: "OpenAI GPT-OSS 20B" | Error in 'ai' command: No configuration found for provider: "Splunk Hosted Models" and model: "gpt-oss-20b" | Error in 'ai' command: No default LLM configuration found.
+FAILED splunk-hosted-models-probe - probeHostedModels() returned false; Sentinel will use the Gemini generation fallback in this runtime
 ```
 
 Then run Sentinel agent checks:
@@ -194,3 +218,47 @@ action.webhook.param.url = http://localhost:3001/webhooks/splunk-alert
 ```
 
 The webhook route also accepts direct test payloads from `pnpm sentinel:e2e`.
+
+## Autonomous Demo Saved Search
+
+The demo autonomous path creates the Splunk saved search through the management API:
+
+```bash
+pnpm sentinel:demo:setup
+```
+
+It creates or updates:
+
+```text
+name: sentinel_auto_detect_payment_errors
+schedule: */1 * * * *
+search: index=prod sourcetype=app service=payment error_type=ECONNRESET | stats count as error_count | where error_count > 15
+webhook: http://host.docker.internal:3001/webhooks/splunk-alert
+```
+
+For the Docker setup used locally, `host.docker.internal` does not resolve inside `sentinel-splunk`. The setup script detects that and writes the webhook URL as:
+
+```text
+http://172.17.0.1:3001/webhooks/splunk-alert
+```
+
+Verification command from inside the container:
+
+```bash
+docker exec sentinel-splunk curl -s http://172.17.0.1:3001/health
+```
+
+The manual fast path remains available:
+
+```bash
+pnpm sentinel:demo
+```
+
+The autonomous path is:
+
+```bash
+pnpm sentinel:demo:setup
+pnpm dev:api
+pnpm sentinel:demo:logs
+# wait up to 90 seconds; do not run the trigger script
+```

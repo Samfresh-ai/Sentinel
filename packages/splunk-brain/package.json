@@ -8,6 +8,11 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./models": {
+      "development": "./src/models.ts",
+      "types": "./dist/models.d.ts",
+      "import": "./dist/models.js"
     }
   },
   "scripts": {

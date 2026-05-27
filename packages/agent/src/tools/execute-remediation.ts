@@ -4,6 +4,7 @@ import { WebClient } from "@slack/web-api";
 import { splunkHecSend, splunkKvPut, splunkKvQuery } from "@operaiq/splunk-mcp";
 import { remediationExecutionsCollection } from "@operaiq/brain";
 import { executeRemediationInputSchema, type ExecuteRemediationResult, type RemediationAction, type RiskLevel } from "@operaiq/shared";
+import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@operaiq/shared";
 import { mongoAggregate, mongoFind } from "../mcp.js";
 import { getAgentEnv } from "../env.js";
 import { executeRemediationSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
@@ -29,7 +30,7 @@ function riskFromParameters(parameters: Record<string, string | number>): RiskLe
 }
 
 function isLocalVerifyMode(): boolean {
-  return process.env.OPERAIQ_LOCAL_VERIFY?.toLowerCase() === "true";
+  return canUseLocalVerificationEffect();
 }
 
 function isSentinelMode(): boolean {
@@ -54,13 +55,19 @@ function slackClient(): WebClient {
   return new WebClient(token);
 }
 
-async function serviceConfig(targetService: string): Promise<ServiceExecutionConfig> {
-  if (isSentinelMode()) {
-    const serviceDoc = (await splunkKvQuery("services", { name: targetService }, 1))[0];
+async function serviceConfig(targetService: string, orgId?: string): Promise<ServiceExecutionConfig> {
+  if (isSentinelMode() && orgId) {
+    const serviceDoc = (await splunkKvQuery("services", { name: targetService }, 1, orgId))[0];
     if (!serviceDoc) {
-      throw new Error(`Service ${targetService} not found in Sentinel Splunk brain`);
+      return {
+        name: targetService,
+        owners: [],
+        incidentChannel: getAgentEnv().SLACK_DEFAULT_INCIDENT_CHANNEL || (isLocalVerifyMode() ? "local-verify" : null),
+        adminBaseUrl: null,
+        cloudRunServiceName: null
+      };
     }
-    const runtimeDoc = (await splunkKvQuery("service_runtime_configs", { serviceName: targetService }, 1))[0];
+    const runtimeDoc = (await splunkKvQuery("service_runtime_configs", { serviceName: targetService }, 1, orgId))[0];
     return {
       name: asString(serviceDoc.name),
       owners: asStringArray(serviceDoc.owners),
@@ -103,6 +110,7 @@ function validateConfigForAction(action: RemediationAction, config: ServiceExecu
   if ((action === "purge_cache" || action === "rotate_connection_pool") && !config.adminBaseUrl) {
     throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
   }
+  if (action === "notify_team" && isLocalVerifyMode()) return;
   if (action === "notify_team" && !config.incidentChannel) {
     throw new Error(`service_runtime_configs.${config.name}.incidentChannel or SLACK_DEFAULT_INCIDENT_CHANNEL is required for ${action}`);
   }
@@ -117,9 +125,11 @@ async function logExecution(input: {
   output: string;
   requiresHumanApproval: boolean;
   executedAt: Date;
+  orgId?: string;
 }): Promise<void> {
-  if (isSentinelMode()) {
+  if (isSentinelMode() && input.orgId) {
     const document = {
+      orgId: input.orgId,
       action: input.action,
       targetService: input.targetService,
       parameters: input.parameters,
@@ -130,7 +140,7 @@ async function logExecution(input: {
       executedAt: input.executedAt.toISOString(),
       createdAt: new Date().toISOString()
     };
-    await splunkKvPut("remediation_executions", null, document);
+    await splunkKvPut("remediation_executions", null, document, input.orgId);
     await splunkHecSend({
       sourcetype: "sentinel:remediation",
       event: {
@@ -173,7 +183,8 @@ async function postSlackMessage(config: ServiceExecutionConfig, input: {
   const incidentId = parameterString(input.parameters, "incidentId") ?? "";
   const liveUrl = incidentId ? `${env.PUBLIC_APP_URL}/incidents/${incidentId}` : env.PUBLIC_APP_URL;
   const ownerMentions = config.owners.map((owner) => `<@${owner}>`).join(" ");
-  const text = [
+  const escalationMessage = input.action === "notify_team" ? parameterString(input.parameters, "escalationMessage") : undefined;
+  const text = escalationMessage ?? [
     `*${agentName()} Incident* - ${input.targetService} ${severity}`,
     `*Status:* In progress`,
     `*Symptoms:* ${symptoms}`,
@@ -268,13 +279,15 @@ async function dispatchRemediationJob(
 }
 
 export async function executeRemediation(input: unknown): Promise<ExecuteRemediationResult> {
+  assertProductionSafeRuntime("Sentinel remediation executor");
   const parsed = executeRemediationInputSchema.parse(input);
   invocationStarted("execute_remediation", parsed);
   const executedAt = new Date();
   const riskLevel = riskFromParameters(parsed.parameters);
+  const orgId = parameterString(parsed.parameters, "orgId");
   let result: ExecuteRemediationResult;
   try {
-    const config = await serviceConfig(parsed.targetService);
+    const config = await serviceConfig(parsed.targetService, orgId);
     if (riskLevel !== "low") {
       const output = await postSlackMessage(config, {
         action: parsed.action,
@@ -290,14 +303,24 @@ export async function executeRemediation(input: unknown): Promise<ExecuteRemedia
         output,
         requiresHumanApproval: true
       };
-      await logExecution({ ...parsed, riskLevel, success: false, output, requiresHumanApproval: true, executedAt });
+      await logExecution({ ...parsed, riskLevel, success: false, output, requiresHumanApproval: true, executedAt, ...(orgId ? { orgId } : {}) });
       invocationFinished("execute_remediation", result);
       return result;
     }
     validateConfigForAction(parsed.action, config);
+    const localEscalationMessage = parsed.action === "notify_team" ? parameterString(parsed.parameters, "escalationMessage") : undefined;
     const output = isLocalVerifyMode()
-      ? `Local verification recorded ${parsed.action} for ${config.name}; Cloud Run dispatch skipped.`
-      : await dispatchRemediationJob(parsed.action, config, parsed.parameters);
+      ? localEscalationMessage
+        ? `Local verification Slack notification:\n${localEscalationMessage}`
+        : `Local verification recorded ${parsed.action} for ${config.name}; external dispatch skipped.`
+      : parsed.action === "notify_team"
+        ? await postSlackMessage(config, {
+          action: parsed.action,
+          targetService: parsed.targetService,
+          parameters: parsed.parameters,
+          approvalRequired: false
+        })
+        : await dispatchRemediationJob(parsed.action, config, parsed.parameters);
     result = {
       success: true,
       action: parsed.action,
@@ -306,7 +329,7 @@ export async function executeRemediation(input: unknown): Promise<ExecuteRemedia
       output,
       requiresHumanApproval: false
     };
-    await logExecution({ ...parsed, riskLevel, success: true, output, requiresHumanApproval: false, executedAt });
+    await logExecution({ ...parsed, riskLevel, success: true, output, requiresHumanApproval: false, executedAt, ...(orgId ? { orgId } : {}) });
     invocationFinished("execute_remediation", result);
     return result;
   } catch (error: unknown) {
@@ -317,7 +340,8 @@ export async function executeRemediation(input: unknown): Promise<ExecuteRemedia
       success: false,
       output,
       requiresHumanApproval: riskLevel !== "low",
-      executedAt
+      executedAt,
+      ...(orgId ? { orgId } : {})
     });
     result = {
       success: false,

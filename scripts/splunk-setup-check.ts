@@ -17,6 +17,9 @@ async function main(): Promise<void> {
   writeLine("PASSED splunk-rest - management API is reachable");
 
   await createCollection("_sentinel_setup_check", { checkedAt: "string" });
+  await createCollection("audit_log", {});
+  await createCollection("rate_limit_windows", {});
+  await createCollection("dead_letter", {});
   const inserted = await insertDocument("_sentinel_setup_check", { checkedAt: new Date().toISOString() });
   await deleteDocument("_sentinel_setup_check", inserted._key);
   writeLine("PASSED splunk-kvstore - collection create/insert/delete succeeded");

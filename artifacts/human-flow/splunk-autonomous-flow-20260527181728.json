@@ -1,0 +1,48 @@
+{
+  "startedAt": "2026-05-27T18:17:28.289Z",
+  "completedAt": "2026-05-27T18:18:13.109Z",
+  "appProject": {
+    "orgId": "7e34d125855bbc0322846d52",
+    "orgName": "Human Flow 1779905848297-2a9aa8",
+    "adminEmail": "human-flow-1779905848297-2a9aa8@sentinel.local",
+    "projectId": "project_7e34d125_20260527181728"
+  },
+  "flow": {
+    "appCreatedProject": true,
+    "splunkWebhookReachability": "Splunk container -> http://172.17.0.1:3001 verified before run",
+    "savedSearchName": "human_flow_7e34d125_econnreset",
+    "savedSearchScheduled": true,
+    "savedSearchCron": "* * * * *",
+    "savedSearchWebhookConfigured": true,
+    "logsSentToSplunk": 86,
+    "indexedCounts": {
+      "total": 86,
+      "econnreset": 34
+    },
+    "schedulerFiredCount": 1,
+    "incidentId": "6a77d60a1f0bb0d016f330c6",
+    "finalStatus": "resolved",
+    "agentSteps": [
+      "ASSESS",
+      "REMEMBER",
+      "MAP",
+      "INVESTIGATE",
+      "RETRIEVE",
+      "ACT",
+      "ACT",
+      "VERIFY",
+      "VERIFY",
+      "CLOSE"
+    ],
+    "postmortemId": "3f93aa32230e7aea69bcd24e",
+    "postmortemIndexedCount": 0
+  },
+  "acceptance": {
+    "appToSplunkLogs": true,
+    "splunkWatchedAndWebhookFired": true,
+    "sentinelActed": true,
+    "sentinelVerified": true,
+    "sentinelClosed": false,
+    "acceptable": false
+  }
+}

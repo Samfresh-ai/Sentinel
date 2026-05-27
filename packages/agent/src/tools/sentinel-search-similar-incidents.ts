@@ -7,32 +7,28 @@ import type { SimilarIncident } from "./search-similar-incidents.js";
 
 export const sentinelSearchSimilarIncidentsInputSchema = z.object({
   symptoms: z.array(z.string().min(1)).min(1),
-  limit: z.number().int().positive().max(20).default(5)
+  limit: z.number().int().positive().max(20).default(5),
+  orgId: z.string().min(1),
+  currentIncidentId: z.string().regex(/^[a-f\d]{24}$/i).optional()
 });
 
 function tokens(values: string[]): string[] {
+  const stopwords = new Set(["sentinel", "demo", "service", "app", "prod", "alert"]);
   return [
     ...new Set(
       values
         .flatMap((value) => value.toLowerCase().match(/[a-z0-9]+/g) ?? [])
-        .filter((token) => token.length > 2)
+        .filter((token) => token.length > 2 && !stopwords.has(token))
     )
   ];
 }
 
 function localKeywordSimilarity(doc: Record<string, unknown>, symptomTerms: string[]): number {
   if (symptomTerms.length === 0) return 0;
-  const haystack = [
-    asString(doc.title),
-    asNullableString(doc.rootCause) ?? "",
-    asNullableString(doc.resolution) ?? "",
-    asStringArray(doc.symptoms).join(" "),
-    asStringArray(doc.remediationSteps).join(" ")
-  ]
-    .join(" ")
-    .toLowerCase();
-  const matched = symptomTerms.filter((term) => haystack.includes(term)).length;
-  return Number((matched / symptomTerms.length).toFixed(4));
+  const candidateTerms = tokens(asStringArray(doc.symptoms));
+  if (candidateTerms.length === 0) return 0;
+  const matched = candidateTerms.filter((term) => symptomTerms.includes(term)).length;
+  return Number(Math.min(0.95, matched / Math.max(1, candidateTerms.length - 1)).toFixed(4));
 }
 
 function mapIncident(doc: Record<string, unknown>, similarity: number): SimilarIncident {
@@ -53,16 +49,21 @@ export async function sentinelSearchSimilarIncidents(input: unknown): Promise<Si
   invocationStarted("search_similar_incidents", parsed);
   try {
     // Sentinel's score is honest keyword overlap from SPL/KV Store, not vector similarity.
-    const splMatches = await findSimilarIncidents(parsed.symptoms, parsed.limit);
+    const splMatches = await findSimilarIncidents(parsed.symptoms, parsed.limit, {
+      orgId: parsed.orgId,
+      ...(parsed.currentIncidentId ? { currentIncidentId: parsed.currentIncidentId } : {})
+    });
     if (splMatches.length > 0) {
       invocationFinished("search_similar_incidents", splMatches);
       return splMatches;
     }
 
-    const docs = await splunkKvQuery("incidents", { status: "resolved" }, 100);
+    const docs = await splunkKvQuery("incidents", { status: "resolved" }, 100, parsed.orgId);
     const symptomTerms = tokens(parsed.symptoms);
     const fallback = docs
+      .filter((doc) => asString(doc._key) !== parsed.currentIncidentId)
       .map((doc) => mapIncident(doc, localKeywordSimilarity(doc, symptomTerms)))
+      .filter((incident) => incident.similarity > 0)
       .sort((left, right) => right.similarity - left.similarity)
       .slice(0, parsed.limit);
     invocationFinished("search_similar_incidents", fallback);

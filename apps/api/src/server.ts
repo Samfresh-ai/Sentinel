@@ -1,10 +1,11 @@
 import { createCollectionsAndIndexes } from "@operaiq/brain";
-import { createLogger } from "@operaiq/shared";
+import { assertProductionSafeRuntime, createLogger } from "@operaiq/shared";
 import { createApp } from "./app.js";
 
 const logger = createLogger("operaiq-api-server");
 
 async function main(): Promise<void> {
+  assertProductionSafeRuntime("Sentinel API");
   await createCollectionsAndIndexes();
   const port = Number.parseInt(process.env.PORT ?? "3001", 10);
   const app = createApp();

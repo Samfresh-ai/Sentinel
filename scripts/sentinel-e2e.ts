@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { getSentinelIncident, runSearch } from "@operaiq/splunk-brain";
+import { ensureDemoOrg } from "./demo/org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -27,8 +28,9 @@ async function main(): Promise<void> {
   process.env.OPERAIQ_REMEDIATION_WAIT_MS = process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "0";
   process.env.OPERAIQ_AI_PROVIDER = process.env.OPERAIQ_AI_PROVIDER ?? "offline";
 
+  const org = await ensureDemoOrg();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-  const webhook = await requestJson<{ incidentId: string; status: string }>(`${apiUrl}/webhooks/splunk-alert`, {
+  const webhook = await requestJson<{ incidentId: string; status: string }>(`${apiUrl}/webhooks/splunk-alert?orgId=${encodeURIComponent(org.orgId)}&secret=${encodeURIComponent(org.webhookSecret)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -50,7 +52,7 @@ async function main(): Promise<void> {
 
   let finalIncident: Record<string, unknown> | null = null;
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    const incident = await getSentinelIncident(webhook.incidentId);
+    const incident = await getSentinelIncident(webhook.incidentId, org.orgId);
     if (incident?.status === "resolved") {
       finalIncident = incident;
       break;
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
     throw new Error("Resolved Sentinel incident does not have a post-mortem ID");
   }
 
-  const postmortems = await runSearch("search index=sentinel sourcetype=sentinel:postmortem | head 20", { maxResults: 20 });
+  const postmortems = await runSearch(`search index=sentinel sourcetype=sentinel:postmortem orgId=${org.orgId} | head 20`, { maxResults: 20 });
   if (postmortems.length === 0) throw new Error("No sentinel:postmortem events found after e2e");
   writeLine(`PASSED sentinel:e2e - incident=${webhook.incidentId}, postmortemId=${finalIncident.postMortemId}, indexedPostmortems=${postmortems.length}`);
 }

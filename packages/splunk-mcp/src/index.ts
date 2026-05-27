@@ -1,6 +1,7 @@
 import {
   getDocument,
   insertDocument,
+  type KvStoreOptions,
   queryDocuments,
   runSearch,
   sendEvent,
@@ -17,33 +18,36 @@ export async function splunkSearch(query: string, earliest?: string, latest?: st
   });
 }
 
-export async function splunkKvGet(collection: string, key: string): Promise<Record<string, unknown> | null> {
-  return getDocument<Record<string, unknown>>(collection, key);
+export async function splunkKvGet(collection: string, key: string, orgId?: string): Promise<Record<string, unknown> | null> {
+  return getDocument<Record<string, unknown>>(collection, key, orgId ? { orgId } : undefined);
 }
 
 export async function splunkKvQuery(
   collection: string,
   filter: Record<string, unknown>,
-  limit = 100
+  limit = 100,
+  orgId?: string
 ): Promise<Record<string, unknown>[]> {
-  return queryDocuments<Record<string, unknown>>(collection, filter, limit);
+  return queryDocuments<Record<string, unknown>>(collection, filter, limit, orgId ? { orgId } : undefined);
 }
 
 export async function splunkKvPut(
   collection: string,
   key: string | null,
-  document: Record<string, unknown>
+  document: Record<string, unknown>,
+  orgId?: string
 ): Promise<{ key: string }> {
+  const options: KvStoreOptions | undefined = orgId ? { orgId } : undefined;
   if (key) {
-    const existing = await splunkKvGet(collection, key);
+    const existing = await splunkKvGet(collection, key, orgId);
     if (existing) {
-      await updateDocument(collection, key, document);
+      await updateDocument(collection, key, document, options);
       return { key };
     }
-    const inserted = await insertDocument(collection, { ...document, _key: key });
+    const inserted = await insertDocument(collection, { ...document, _key: key }, options);
     return { key: inserted._key };
   }
-  const inserted = await insertDocument(collection, document);
+  const inserted = await insertDocument(collection, document, options);
   return { key: inserted._key };
 }
 

@@ -131,6 +131,7 @@ export async function splunkRestRequest<T>(
     path: pathWithParams(input.path, input.query),
     rejectUnauthorized: !allowSelfSigned,
     headers: {
+      // SCS tokens are Splunk Cloud Platform only. Local Enterprise uses Basic Auth.
       Authorization: `Basic ${Buffer.from(`${config.SPLUNK_USERNAME}:${config.SPLUNK_PASSWORD}`).toString("base64")}`,
       ...(input.json !== undefined
         ? { "Content-Type": "application/json" }

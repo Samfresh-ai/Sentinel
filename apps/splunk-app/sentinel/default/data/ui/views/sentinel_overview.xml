@@ -1,0 +1,83 @@
+<dashboard version="1.1" theme="dark">
+  <label>Sentinel &#8212; Autonomous Incident Intelligence</label>
+  <description>Real-time view of Sentinel's autonomous operations. Incidents, brain growth, and agent decisions.</description>
+  <row>
+    <panel>
+      <single>
+        <title>Active incidents</title>
+        <search>
+          <query>| inputlookup sentinel_incidents
+| search status=in_progress OR status=open
+| stats count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+      </single>
+    </panel>
+    <panel>
+      <single>
+        <title>Brain size</title>
+        <search>
+          <query>index=sentinel sourcetype=sentinel:postmortem
+| stats dc(event.incidentId) as brain_size</query>
+          <earliest>0</earliest>
+          <latest>now</latest>
+        </search>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Resolution timeline</title>
+        <search>
+          <query>index=sentinel sourcetype=sentinel:postmortem
+| timechart span=1h count as resolved_incidents</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">line</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Severity distribution</title>
+        <search>
+          <query>| inputlookup sentinel_incidents
+| stats count by severity</query>
+          <earliest>0</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Recent agent decisions</title>
+        <search>
+          <query>index=sentinel sourcetype=sentinel:audit
+| table _time event.phase event.toolCalled event.durationMs event.success event.incidentId
+| sort -_time
+| head 20</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Service health</title>
+        <search>
+          <query>index=prod sourcetype=app earliest=-15m
+| stats count as event_count, count(eval(level="error")) as error_count by service
+| eval error_rate=round(error_count/event_count*100,1)
+| sort -error_rate</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+</dashboard>
