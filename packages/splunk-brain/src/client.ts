@@ -12,12 +12,16 @@ export type SplunkConfig = SplunkEnv;
 
 export const SplunkConfigSchema = z.object({
   SPLUNK_HOST: z.string().default("localhost"),
+  SPLUNK_MGMT_URL: z.string().url().optional(),
+  SPLUNK_HEC_URL: z.string().url().optional(),
   SPLUNK_MGMT_PORT: z.number().default(8089),
   SPLUNK_HEC_PORT: z.number().default(8088),
   SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
   SPLUNK_USERNAME: z.string(),
   SPLUNK_PASSWORD: z.string(),
   SPLUNK_HEC_TOKEN: z.string(),
+  SPLUNK_CF_ACCESS_CLIENT_ID: z.string().optional(),
+  SPLUNK_CF_ACCESS_CLIENT_SECRET: z.string().optional(),
   SPLUNK_APP: z.string().default("sentinel"),
   SPLUNK_INDEX: z.string().default("sentinel")
 });
@@ -30,8 +34,78 @@ function isLocalHost(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
-function shouldAllowSelfSigned(config: SplunkConfig): boolean {
-  return isLocalHost(config.SPLUNK_HOST);
+function endpointFromUrl(value: string): {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+  basePath: string;
+} {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Splunk endpoint must use http or https: ${url.protocol}`);
+  }
+  return {
+    protocol: url.protocol,
+    host: url.hostname,
+    ...(url.port ? { port: Number.parseInt(url.port, 10) } : {}),
+    basePath: url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "")
+  };
+}
+
+function shouldAllowSelfSigned(endpoint: { host: string }): boolean {
+  return isLocalHost(endpoint.host);
+}
+
+function managementEndpoint(config: SplunkConfig): {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+  basePath: string;
+} {
+  if (config.SPLUNK_MGMT_URL) return endpointFromUrl(config.SPLUNK_MGMT_URL);
+  return {
+    protocol: "https:",
+    host: config.SPLUNK_HOST,
+    port: config.SPLUNK_MGMT_PORT,
+    basePath: ""
+  };
+}
+
+function hecEndpoint(config: SplunkConfig): {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+  basePath: string;
+} {
+  if (config.SPLUNK_HEC_URL) return endpointFromUrl(config.SPLUNK_HEC_URL);
+  return {
+    protocol: `${config.SPLUNK_HEC_PROTOCOL}:`,
+    host: config.SPLUNK_HOST,
+    port: config.SPLUNK_HEC_PORT,
+    basePath: ""
+  };
+}
+
+function accessHeaders(config: SplunkConfig): Record<string, string> {
+  if (!config.SPLUNK_CF_ACCESS_CLIENT_ID || !config.SPLUNK_CF_ACCESS_CLIENT_SECRET) return {};
+  return {
+    "CF-Access-Client-Id": config.SPLUNK_CF_ACCESS_CLIENT_ID,
+    "CF-Access-Client-Secret": config.SPLUNK_CF_ACCESS_CLIENT_SECRET
+  };
+}
+
+function requestEndpoint(endpoint: {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+}): {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+} {
+  return endpoint.port === undefined
+    ? { protocol: endpoint.protocol, host: endpoint.host }
+    : { protocol: endpoint.protocol, host: endpoint.host, port: endpoint.port };
 }
 
 function pathWithParams(path: string, query?: Record<string, string | number | boolean | undefined>): string {
@@ -62,7 +136,7 @@ async function readResponseBody(response: http.IncomingMessage): Promise<string>
 async function requestRaw(input: {
   protocol: "http:" | "https:";
   host: string;
-  port: number;
+  port?: number;
   method: "GET" | "POST" | "DELETE";
   path: string;
   headers?: Record<string, string>;
@@ -80,7 +154,7 @@ async function requestRaw(input: {
       {
         protocol: input.protocol,
         hostname: input.host,
-        port: input.port,
+        ...(input.port !== undefined ? { port: input.port } : {}),
         method: input.method,
         path: input.path,
         headers,
@@ -118,20 +192,20 @@ export async function splunkRestRequest<T>(
   }
 ): Promise<T> {
   const config = getSplunkConfig();
-  const allowSelfSigned = shouldAllowSelfSigned(config);
+  const endpoint = managementEndpoint(config);
+  const allowSelfSigned = shouldAllowSelfSigned(endpoint);
   if (allowSelfSigned && !warnedSelfSigned) {
-    logger.warn({ host: config.SPLUNK_HOST }, "Splunk local self-signed certificate validation is disabled for localhost only");
+    logger.warn({ host: endpoint.host }, "Splunk local self-signed certificate validation is disabled for localhost only");
     warnedSelfSigned = true;
   }
   const body = input.json !== undefined ? JSON.stringify(input.json) : input.form ? formBody(input.form) : undefined;
   const requestInput = {
-    protocol: "https:",
-    host: config.SPLUNK_HOST,
-    port: config.SPLUNK_MGMT_PORT,
+    ...requestEndpoint(endpoint),
     method: input.method ?? "GET",
-    path: pathWithParams(input.path, input.query),
+    path: `${endpoint.basePath}${pathWithParams(input.path, input.query)}`,
     rejectUnauthorized: !allowSelfSigned,
     headers: {
+      ...accessHeaders(config),
       // SCS tokens are Splunk Cloud Platform only. Local Enterprise uses Basic Auth.
       Authorization: `Basic ${Buffer.from(`${config.SPLUNK_USERNAME}:${config.SPLUNK_PASSWORD}`).toString("base64")}`,
       ...(input.json !== undefined
@@ -147,16 +221,15 @@ export async function splunkRestRequest<T>(
 
 export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown): Promise<T> {
   const config = getSplunkConfig();
-  const protocol = `${config.SPLUNK_HEC_PROTOCOL}:` as const;
+  const endpoint = hecEndpoint(config);
   const text = await requestRaw({
-    protocol,
-    host: config.SPLUNK_HOST,
-    port: config.SPLUNK_HEC_PORT,
+    ...requestEndpoint(endpoint),
     method: "POST",
-    path: "/services/collector/event",
+    path: `${endpoint.basePath}/services/collector/event`,
     body: JSON.stringify(payload),
-    rejectUnauthorized: !shouldAllowSelfSigned(config),
+    rejectUnauthorized: !shouldAllowSelfSigned(endpoint),
     headers: {
+      ...accessHeaders(config),
       Authorization: `Splunk ${config.SPLUNK_HEC_TOKEN}`,
       "Content-Type": "application/json"
     }

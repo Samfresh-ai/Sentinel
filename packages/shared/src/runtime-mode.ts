@@ -26,6 +26,20 @@ function isLocalUrl(value: string): boolean {
   }
 }
 
+function endpointHostname(value: string): string {
+  if (!value) return "";
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value;
+  }
+}
+
+function isLocalEndpoint(value: string): boolean {
+  const hostname = endpointHostname(value);
+  return !hostname || isLocalHostname(hostname);
+}
+
 function isLocalHostname(value: string): boolean {
   const hostname = value.trim().toLowerCase();
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
@@ -99,8 +113,13 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
     violations.push("NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
   }
   const splunkHost = envValue(env, "SPLUNK_HOST");
-  if (!splunkHost || isLocalHostname(splunkHost)) {
-    violations.push("SPLUNK_HOST must be a reachable non-local Splunk host in production");
+  const splunkMgmtEndpoint = envValue(env, "SPLUNK_MGMT_URL") || splunkHost;
+  const splunkHecEndpoint = envValue(env, "SPLUNK_HEC_URL") || splunkHost;
+  if (isLocalEndpoint(splunkMgmtEndpoint)) {
+    violations.push("SPLUNK_MGMT_URL or SPLUNK_HOST must point to a reachable non-local Splunk management endpoint in production");
+  }
+  if (isLocalEndpoint(splunkHecEndpoint)) {
+    violations.push("SPLUNK_HEC_URL or SPLUNK_HOST must point to a reachable non-local Splunk HEC endpoint in production");
   }
   for (const key of ["SPLUNK_USERNAME", "SPLUNK_PASSWORD", "SPLUNK_HEC_TOKEN"]) {
     if (!hasEnv(env, key)) violations.push(`${key} is required for production Splunk access`);
