@@ -14,6 +14,10 @@ function writeLine(line: string): void {
 
 const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
 
+function scopedKey(orgId: string, key: string): string {
+  return `${orgId}-${key}`;
+}
+
 function optionalEnv(name: string): string | null {
   const value = process.env[name];
   return value && value.trim().length > 0 ? value : null;
@@ -136,11 +140,12 @@ async function recreateCollections(orgId: string): Promise<void> {
 async function main(): Promise<void> {
   const org = await ensureDemoOrg();
   await recreateCollections(org.orgId);
+  const runbookKey = (incidentType: string) => scopedKey(org.orgId, incidentType);
 
   await batchInsert(
     "runbooks",
     runbooks.map((runbook) => ({
-      _key: runbook.incidentType,
+      _key: runbookKey(runbook.incidentType),
       ...runbook,
       fallbackAction: runbook.incidentType.includes("redis") ? "restart_pod" : "notify_team",
       createdAt: new Date().toISOString(),
@@ -148,12 +153,27 @@ async function main(): Promise<void> {
     })),
     { orgId: org.orgId }
   );
-  await batchInsert("services", services, { orgId: org.orgId });
-  await batchInsert("service_runtime_configs", runtimeConfigs, { orgId: org.orgId });
+  await batchInsert(
+    "services",
+    services.map((service) => ({
+      ...service,
+      _key: scopedKey(org.orgId, service.name),
+      runbookIds: service.runbookIds.map(runbookKey)
+    })),
+    { orgId: org.orgId }
+  );
+  await batchInsert(
+    "service_runtime_configs",
+    runtimeConfigs.map((config) => ({
+      ...config,
+      _key: scopedKey(org.orgId, config.serviceName)
+    })),
+    { orgId: org.orgId }
+  );
   await batchInsert(
     "incidents",
     incidents.map((incident, index) => ({
-      _key: `seed-incident-${String(index + 1).padStart(2, "0")}`,
+      _key: scopedKey(org.orgId, `seed-incident-${String(index + 1).padStart(2, "0")}`),
       ...incident,
       detectedAt: incident.detectedAt.toISOString(),
       resolvedAt: toIso(incident.resolvedAt),
@@ -166,7 +186,7 @@ async function main(): Promise<void> {
   await batchInsert(
     "patterns",
     patterns.map((pattern) => ({
-      _key: pattern.name,
+      _key: scopedKey(org.orgId, pattern.name),
       ...pattern,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -180,7 +200,7 @@ async function main(): Promise<void> {
       event: {
         type: "postmortem",
         orgId: org.orgId,
-        incidentId: `seed-incident-${String(index + 1).padStart(2, "0")}`,
+        incidentId: scopedKey(org.orgId, `seed-incident-${String(index + 1).padStart(2, "0")}`),
         title: incident.title,
         severity: incident.severity,
         symptoms: incident.symptoms,

@@ -7,6 +7,10 @@ function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+function scopedKey(orgId: string, key: string): string {
+  return `${orgId}-${key}`;
+}
+
 async function main(): Promise<void> {
   const org = await ensureDemoOrg();
   const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
@@ -15,12 +19,12 @@ async function main(): Promise<void> {
       collection: "incidents",
       label: "incidents",
       count: 20,
-      filter: { _key: { $in: incidents.map((_, index) => `seed-incident-${String(index + 1).padStart(2, "0")}`) } }
+      filter: { _key: { $in: incidents.map((_, index) => scopedKey(org.orgId, `seed-incident-${String(index + 1).padStart(2, "0")}`)) } }
     },
-    { collection: "services", label: "services", count: 5, filter: { _key: { $in: serviceNames } } },
-    { collection: "service_runtime_configs", label: "service_runtime_configs", count: 5, filter: { _key: { $in: serviceNames } } },
-    { collection: "runbooks", label: "runbooks", count: 8, filter: { _key: { $in: runbooks.map((runbook) => runbook.incidentType) } } },
-    { collection: "patterns", label: "patterns", count: 5, filter: { _key: { $in: patterns.map((pattern) => pattern.name) } } }
+    { collection: "services", label: "services", count: 5, filter: { _key: { $in: serviceNames.map((name) => scopedKey(org.orgId, name)) } } },
+    { collection: "service_runtime_configs", label: "service_runtime_configs", count: 5, filter: { _key: { $in: serviceNames.map((name) => scopedKey(org.orgId, name)) } } },
+    { collection: "runbooks", label: "runbooks", count: 8, filter: { _key: { $in: runbooks.map((runbook) => scopedKey(org.orgId, runbook.incidentType)) } } },
+    { collection: "patterns", label: "patterns", count: 5, filter: { _key: { $in: patterns.map((pattern) => scopedKey(org.orgId, pattern.name)) } } }
   ];
   const failures: string[] = [];
   for (const { collection, label, count, filter } of expected) {

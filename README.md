@@ -168,6 +168,7 @@ The API refuses production startup when fake-action or demo-timing flags are pre
 | `SPLUNK_HOST` | Splunk Enterprise host for Sentinel, default `localhost`. |
 | `SPLUNK_MGMT_PORT` | Splunk management API port, default `8089`. |
 | `SPLUNK_HEC_PORT` | Splunk HTTP Event Collector port, default `8088`. |
+| `SPLUNK_HEC_PROTOCOL` | HEC protocol, default `https`; local self-signed validation is relaxed only for localhost. |
 | `SPLUNK_USERNAME` | Splunk REST username, usually `admin` locally. |
 | `SPLUNK_PASSWORD` | Splunk REST password; redacted by logger. |
 | `SPLUNK_HEC_TOKEN` | HEC token for writing Sentinel events. |

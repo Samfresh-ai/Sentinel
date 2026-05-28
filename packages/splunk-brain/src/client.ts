@@ -14,6 +14,7 @@ export const SplunkConfigSchema = z.object({
   SPLUNK_HOST: z.string().default("localhost"),
   SPLUNK_MGMT_PORT: z.number().default(8089),
   SPLUNK_HEC_PORT: z.number().default(8088),
+  SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
   SPLUNK_USERNAME: z.string(),
   SPLUNK_PASSWORD: z.string(),
   SPLUNK_HEC_TOKEN: z.string(),
@@ -146,13 +147,15 @@ export async function splunkRestRequest<T>(
 
 export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown): Promise<T> {
   const config = getSplunkConfig();
+  const protocol = `${config.SPLUNK_HEC_PROTOCOL}:` as const;
   const text = await requestRaw({
-    protocol: "http:",
+    protocol,
     host: config.SPLUNK_HOST,
     port: config.SPLUNK_HEC_PORT,
     method: "POST",
     path: "/services/collector/event",
     body: JSON.stringify(payload),
+    rejectUnauthorized: !shouldAllowSelfSigned(config),
     headers: {
       Authorization: `Splunk ${config.SPLUNK_HEC_TOKEN}`,
       "Content-Type": "application/json"
