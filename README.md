@@ -113,7 +113,7 @@ Splunk Hosted Models require the Splunk AI Toolkit path, not the older `genai` /
 
 Production Sentinel must be deployed separately from OperaIQ.
 
-Preferred non-GCP path for Sentinel web/API: Railway with `deploy/railway/sentinel-api.railway.json` and `deploy/railway/sentinel-web.railway.json`. Use Splunk Cloud or a separately managed Splunk Enterprise target for production Splunk. A Railway Splunk container is demo-only unless it has persistent `/opt/splunk/etc`, persistent `/opt/splunk/var`, backups, a real HEC token, and enough memory/disk for Splunk.
+Preferred non-GCP path for Sentinel web/API: Railway with `deploy/railway/sentinel-api.railway.json` and `deploy/railway/sentinel-web.railway.json`, or Render with the constraints in `deploy/render/README.md`. Use Splunk Cloud or a separately managed Splunk Enterprise target for production Splunk. A platform-hosted Splunk container is demo-only unless it has persistent `/opt/splunk/etc`, persistent `/opt/splunk/var`, backups, a real HEC token, and enough memory/disk for Splunk.
 
 Google Cloud remains supported through `cloudbuild.sentinel.yaml`; it builds the same shared code but publishes Cloud Run services and jobs under `sentinel-*` names instead of `operaiq-*`:
 
