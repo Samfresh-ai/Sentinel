@@ -20,6 +20,7 @@ export const SplunkConfigSchema = z.object({
   SPLUNK_USERNAME: z.string(),
   SPLUNK_PASSWORD: z.string(),
   SPLUNK_HEC_TOKEN: z.string(),
+  SPLUNK_GATEWAY_TOKEN: z.string().optional(),
   SPLUNK_CF_ACCESS_CLIENT_ID: z.string().optional(),
   SPLUNK_CF_ACCESS_CLIENT_SECRET: z.string().optional(),
   SPLUNK_APP: z.string().default("sentinel"),
@@ -87,11 +88,15 @@ function hecEndpoint(config: SplunkConfig): {
 }
 
 function accessHeaders(config: SplunkConfig): Record<string, string> {
-  if (!config.SPLUNK_CF_ACCESS_CLIENT_ID || !config.SPLUNK_CF_ACCESS_CLIENT_SECRET) return {};
-  return {
-    "CF-Access-Client-Id": config.SPLUNK_CF_ACCESS_CLIENT_ID,
-    "CF-Access-Client-Secret": config.SPLUNK_CF_ACCESS_CLIENT_SECRET
-  };
+  const headers: Record<string, string> = {};
+  if (config.SPLUNK_GATEWAY_TOKEN) {
+    headers["x-sentinel-splunk-gateway-token"] = config.SPLUNK_GATEWAY_TOKEN;
+  }
+  if (config.SPLUNK_CF_ACCESS_CLIENT_ID && config.SPLUNK_CF_ACCESS_CLIENT_SECRET) {
+    headers["CF-Access-Client-Id"] = config.SPLUNK_CF_ACCESS_CLIENT_ID;
+    headers["CF-Access-Client-Secret"] = config.SPLUNK_CF_ACCESS_CLIENT_SECRET;
+  }
+  return headers;
 }
 
 function requestEndpoint(endpoint: {

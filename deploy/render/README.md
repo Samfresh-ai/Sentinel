@@ -55,6 +55,7 @@ SPLUNK_HEC_PROTOCOL=https
 SPLUNK_USERNAME=<secret>
 SPLUNK_PASSWORD=<secret>
 SPLUNK_HEC_TOKEN=<secret>
+SPLUNK_GATEWAY_TOKEN=<optional-local-tunnel-gateway-token>
 SPLUNK_CF_ACCESS_CLIENT_ID=<optional-cloudflare-access-client-id>
 SPLUNK_CF_ACCESS_CLIENT_SECRET=<optional-cloudflare-access-client-secret>
 SPLUNK_APP=sentinel

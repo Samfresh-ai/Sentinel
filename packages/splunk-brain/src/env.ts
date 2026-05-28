@@ -13,6 +13,7 @@ const splunkEnvSchema = z.object({
   SPLUNK_USERNAME: z.string().min(1),
   SPLUNK_PASSWORD: z.string().min(1),
   SPLUNK_HEC_TOKEN: z.string().min(1),
+  SPLUNK_GATEWAY_TOKEN: z.string().min(1).optional(),
   SPLUNK_CF_ACCESS_CLIENT_ID: z.string().min(1).optional(),
   SPLUNK_CF_ACCESS_CLIENT_SECRET: z.string().min(1).optional(),
   SPLUNK_APP: z.string().min(1).default("sentinel"),
