@@ -1,4 +1,5 @@
 import { ObjectId, type Document, type Filter } from "mongodb";
+import { createLogger } from "@operaiq/shared";
 import {
   incidentsCollection,
   patternsCollection,
@@ -23,6 +24,8 @@ import type {
   RunbookVectorSearchResult,
   ServiceDocument
 } from "./types.js";
+
+const logger = createLogger("operaiq-brain-operations");
 
 export async function insertIncidentWithEmbedding(data: NewIncidentDocument): Promise<ObjectId> {
   const now = new Date();
@@ -128,7 +131,10 @@ export async function searchIncidentVectors(
       }
     }
   ];
-  const results = await collection.aggregate<IncidentVectorSearchResult>(pipeline).toArray();
+  const results = await collection.aggregate<IncidentVectorSearchResult>(pipeline).toArray().catch((error: unknown) => {
+    logger.warn({ error }, "Incident vector search failed; using recency fallback");
+    return [];
+  });
   if (results.length > 0) {
     return results;
   }
@@ -182,7 +188,16 @@ export async function searchRunbookVectors(
     },
     { $addFields: { score: { $meta: "vectorSearchScore" } } }
   ];
-  return (await runbooksCollection()).aggregate<RunbookVectorSearchResult>(pipeline).toArray();
+  const collection = await runbooksCollection();
+  const results = await collection.aggregate<RunbookVectorSearchResult>(pipeline).toArray().catch((error: unknown) => {
+    logger.warn({ error }, "Runbook vector search failed; using service-overlap fallback");
+    return [];
+  });
+  if (results.length > 0) return results;
+  const fallback = await collection
+    .find(overlapFilter, { sort: { updatedAt: -1 }, limit })
+    .toArray();
+  return fallback.map((runbook) => ({ ...runbook, score: 0 }));
 }
 
 export async function searchPatternVectors(queryText: string, limit = 5): Promise<Array<PatternDocument & { score: number }>> {
@@ -199,7 +214,17 @@ export async function searchPatternVectors(queryText: string, limit = 5): Promis
     },
     { $addFields: { score: { $meta: "vectorSearchScore" } } }
   ];
-  return (await patternsCollection()).aggregate<Array<PatternDocument & { score: number }>[number]>(pipeline).toArray();
+  const collection = await patternsCollection();
+  const results = await collection
+    .aggregate<Array<PatternDocument & { score: number }>[number]>(pipeline)
+    .toArray()
+    .catch((error: unknown) => {
+      logger.warn({ error }, "Pattern vector search failed; using recency fallback");
+      return [];
+    });
+  if (results.length > 0) return results;
+  const fallback = await collection.find({}, { sort: { updatedAt: -1 }, limit }).toArray();
+  return fallback.map((pattern) => ({ ...pattern, score: 0 }));
 }
 
 export async function refreshIncidentEmbedding(incident: IncidentDocument): Promise<void> {

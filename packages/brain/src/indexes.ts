@@ -137,9 +137,23 @@ async function ensureVectorSearchIndex<TSchema extends Document>(
     logger.info({ index: name, collection: collection.collectionName }, "Created Atlas Vector Search index");
     await waitForVectorSearchIndex(collection, name);
   } catch (error: unknown) {
+    if (isAtlasSearchIndexLimit(error)) {
+      logger.warn({ error, index: name }, "Atlas Vector Search index quota reached; continuing with non-vector fallback search");
+      return;
+    }
     logger.error({ error, index: name }, "Unable to ensure Atlas Vector Search index");
     throw error;
   }
+}
+
+function isAtlasSearchIndexLimit(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { code?: unknown; message?: unknown; errorResponse?: { errmsg?: unknown } };
+  return (
+    candidate.code === 20 &&
+    (String(candidate.message ?? "").includes("maximum number of FTS indexes") ||
+      String(candidate.errorResponse?.errmsg ?? "").includes("maximum number of FTS indexes"))
+  );
 }
 
 const enumValues = {
