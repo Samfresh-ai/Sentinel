@@ -61,6 +61,8 @@ SPLUNK_INDEX=sentinel
 SPLUNK_DASHBOARD_URL=https://<splunk-web>/en-US/app/sentinel/sentinel_overview
 ```
 
+`SPLUNK_HOST` must be reachable from the deployed API service. Do not use `localhost` in production unless Splunk is running inside the same container, which is not the accepted Sentinel deployment shape.
+
 Set these on `sentinel-web`:
 
 ```text

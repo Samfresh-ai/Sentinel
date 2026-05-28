@@ -132,9 +132,10 @@ Before a public deployment can be considered production-ready:
 - `DEMO_REMEDIATION_WAIT_MS` unset
 - `OPERAIQ_AI_PROVIDER` and `OPERAIQ_GENERATION_PROVIDER` not `offline`
 - `PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, and `AGENT_TOOL_EXECUTION_BASE_URL` set to public HTTPS Sentinel URLs
+- `SPLUNK_HOST` set to a reachable non-local Splunk Enterprise or Splunk Cloud host, with `SPLUNK_USERNAME`, `SPLUNK_PASSWORD`, and `SPLUNK_HEC_TOKEN` configured
 - service runtime configs contain real `adminBaseUrl` values for the admin-endpoint backend, or Cloud Run service names for the Cloud Run backend
 
-The API refuses production startup when fake-action or demo-timing flags are present. The web app also exposes the current runtime gate on the Brain screen so a user can see `Local verification`, `Demo timing`, `Autonomous ready`, or `Production blocked` instead of mistaking demo proof for prod.
+The API refuses production startup when fake-action flags, demo-timing flags, local public URLs, or a local/missing Splunk target are present. The web app also exposes the current runtime gate on the Brain screen so a user can see `Local verification`, `Demo timing`, `Autonomous ready`, or `Production blocked` instead of mistaking demo proof for prod.
 
 ## Environment
 

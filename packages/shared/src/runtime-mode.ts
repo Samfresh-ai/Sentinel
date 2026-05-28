@@ -20,10 +20,15 @@ function isLocalUrl(value: string): boolean {
   if (!value) return false;
   try {
     const url = new URL(value);
-    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+    return isLocalHostname(url.hostname);
   } catch {
     return false;
   }
+}
+
+function isLocalHostname(value: string): boolean {
+  const hostname = value.trim().toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
 export function isLocalVerificationMode(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -92,6 +97,13 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   const apiUrl = envValue(env, "NEXT_PUBLIC_API_URL");
   if (!apiUrl || isLocalUrl(apiUrl)) {
     violations.push("NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
+  }
+  const splunkHost = envValue(env, "SPLUNK_HOST");
+  if (!splunkHost || isLocalHostname(splunkHost)) {
+    violations.push("SPLUNK_HOST must be a reachable non-local Splunk host in production");
+  }
+  for (const key of ["SPLUNK_USERNAME", "SPLUNK_PASSWORD", "SPLUNK_HEC_TOKEN"]) {
+    if (!hasEnv(env, key)) violations.push(`${key} is required for production Splunk access`);
   }
   return violations;
 }
