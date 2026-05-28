@@ -75,6 +75,10 @@ function asyncHandler(handler: (req: Request, res: Response) => Promise<void>) {
   };
 }
 
+function dependencyUnavailable(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ECONNREFUSED";
+}
+
 function verifyWebhookSecret(req: Request): void {
   const expected = process.env.WEBHOOK_SECRET;
   if (!expected) {
@@ -1193,9 +1197,23 @@ export function createApp(): express.Express {
   startDlqMaintenance();
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const status = error instanceof Error && error.name === "Unauthorized" ? 401 : error instanceof Error && error.name === "Forbidden" ? 403 : 500;
-    const message = status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : error instanceof Error ? error.message : "Unknown error";
-    logger.error({ error }, "API request failed");
+    const status =
+      error instanceof Error && error.name === "Unauthorized" ? 401 : error instanceof Error && error.name === "Forbidden" ? 403 : dependencyUnavailable(error) ? 503 : 500;
+    const message =
+      status === 401
+        ? "Unauthorized"
+        : status === 403
+          ? "Forbidden"
+          : status === 503
+            ? "Sentinel dependency unavailable"
+            : error instanceof Error
+              ? error.message
+              : "Unknown error";
+    if (status >= 500) {
+      logger.error({ error, method: _req.method, path: _req.path }, "API request failed");
+    } else {
+      logger.warn({ statusCode: status, method: _req.method, path: _req.path }, "API request rejected");
+    }
     res.status(status).json({ error: message });
   });
 

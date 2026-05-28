@@ -230,8 +230,8 @@ export function authRouter(): Router {
   router.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) => {
     try {
       const auth = req.auth!;
-      const org = await getDocument<Record<string, unknown>>("orgs", auth.orgId);
-      const brainSize = await countDocuments("incidents", {}, { orgId: auth.orgId });
+      const org = await getDocument<Record<string, unknown>>("orgs", auth.orgId).catch(() => null);
+      const brainSize = await countDocuments("incidents", {}, { orgId: auth.orgId }).catch(() => 0);
       res.json({
         orgId: auth.orgId,
         orgName: auth.orgName,

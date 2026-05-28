@@ -2,18 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { fetchServices, type Service } from "@/lib/api";
+import { fetchServices, isUnauthorizedError, type Service } from "@/lib/api";
 
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchServices()
-      .then((response) => setServices(response.items))
+      .then((response) => {
+        setServices(response.items);
+        setError(null);
+      })
       .catch((loadError: unknown) => {
+        if (isUnauthorizedError(loadError)) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load services");
+      })
+      .finally(() => {
+        setLoading(false);
       });
   }, []);
 
@@ -27,6 +35,7 @@ export default function ServicesPage() {
       {error ? <div className="border border-critical bg-panel px-3 py-2 text-[13px] text-critical">{error}</div> : null}
 
       <section className="overflow-hidden border border-border bg-panel">
+        {loading ? <div className="border-b border-border px-3 py-2 font-mono text-[12px] text-muted">Loading service graph</div> : null}
         {services.map((service) => {
           const open = expanded === service.id;
           return (
@@ -62,7 +71,7 @@ export default function ServicesPage() {
             </div>
           );
         })}
-        {services.length === 0 ? <div className="px-3 py-6 text-center font-mono text-[12px] text-muted">No services indexed yet.</div> : null}
+        {!loading && services.length === 0 ? <div className="px-3 py-6 text-center font-mono text-[12px] text-muted">No services indexed yet.</div> : null}
       </section>
     </div>
   );

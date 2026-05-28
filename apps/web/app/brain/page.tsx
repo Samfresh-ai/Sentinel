@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchBrainStats, fetchRuntimeReadiness, fetchServices, simulateIncident, type BrainStats, type RuntimeReadiness, type Service } from "@/lib/api";
+import { fetchBrainStats, fetchRuntimeReadiness, fetchServices, isUnauthorizedError, simulateIncident, type BrainStats, type RuntimeReadiness, type Service } from "@/lib/api";
 
 function timeAgo(value: string | null | undefined): string {
   if (!value) return "none";
@@ -46,22 +46,41 @@ export default function BrainPage() {
   const [symptoms, setSymptoms] = useState("ECONNRESET connection pool latency spike");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([fetchBrainStats(), fetchServices(), fetchRuntimeReadiness()])
-      .then(([brainStats, serviceResponse, runtimeReadiness]) => {
+    let cancelled = false;
+
+    fetchRuntimeReadiness()
+      .then((runtimeReadiness) => {
+        if (!cancelled) setRuntime(runtimeReadiness);
+      })
+      .catch(() => undefined);
+
+    Promise.all([fetchBrainStats(), fetchServices()])
+      .then(([brainStats, serviceResponse]) => {
+        if (cancelled) return;
         setStats(brainStats);
-        setRuntime(runtimeReadiness);
         setServices(serviceResponse.items);
-        if (serviceResponse.items.some((item) => item.name === "payment-service")) {
-          setService("payment-service");
-        } else if (serviceResponse.items[0]) {
-          setService(serviceResponse.items[0].name);
-        }
+        setError(null);
+        setService((current) => {
+          if (serviceResponse.items.some((item) => item.name === current)) return current;
+          if (serviceResponse.items.some((item) => item.name === "payment-service")) return "payment-service";
+          return serviceResponse.items[0]?.name ?? current;
+        });
       })
       .catch((loadError: unknown) => {
+        if (cancelled || isUnauthorizedError(loadError)) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load brain data");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function submit(): Promise<void> {
@@ -78,7 +97,9 @@ export default function BrainPage() {
       });
       router.push(`/incidents/${result.incidentId}`);
     } catch (submitError: unknown) {
-      setError(submitError instanceof Error ? submitError.message : "Unable to simulate incident");
+      if (!isUnauthorizedError(submitError)) {
+        setError(submitError instanceof Error ? submitError.message : "Unable to simulate incident");
+      }
       setSubmitting(false);
     }
   }
@@ -88,6 +109,7 @@ export default function BrainPage() {
   return (
     <div className="min-w-0 space-y-4">
       {error ? <div className="border border-critical bg-panel px-3 py-2 text-[13px] text-critical">{error}</div> : null}
+      {loading ? <div className="border border-border bg-panel px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Loading Sentinel brain</div> : null}
 
       <section className={`border bg-panel ${runtime?.mode === "production-blocked" ? "border-critical" : runtime?.mode === "autonomous-ready" ? "border-active" : "border-warning"}`}>
         <div className="flex flex-col gap-2 px-3 py-2 md:flex-row md:items-center md:justify-between">
@@ -164,7 +186,7 @@ export default function BrainPage() {
           <button
             type="button"
             onClick={submit}
-            disabled={submitting}
+            disabled={submitting || services.length === 0}
             className="mt-5 inline-flex h-9 items-center justify-center gap-2 border border-active bg-elevated px-3 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground hover:bg-background disabled:cursor-wait disabled:text-muted"
           >
             {submitting ? <span className="h-3 w-3 animate-spin rounded-full border border-muted border-t-active" aria-hidden="true" /> : null}

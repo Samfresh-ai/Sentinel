@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { fetchSplunkOverview, storedToken, type SplunkOverview } from "@/lib/api";
+import { fetchSplunkOverview, isUnauthorizedError, storedToken, type SplunkOverview } from "@/lib/api";
 
 function timeAgo(value: string): string {
   const diffMs = Date.now() - new Date(value).getTime();
@@ -54,6 +54,7 @@ export default function SplunkOverviewPage() {
           setError(null);
         }
       } catch (loadError: unknown) {
+        if (isUnauthorizedError(loadError)) return;
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Unable to load Splunk overview");
       }
     }

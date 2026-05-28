@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { fetchBrainStats, storedToken, type BrainStats } from "@/lib/api";
+import { AUTH_CHANGED_EVENT, clearStoredToken, fetchBrainStats, fetchMe, isUnauthorizedError, storedToken, type BrainStats } from "@/lib/api";
 
 function navClass(active: boolean): string {
   return [
@@ -36,20 +36,56 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [stats, setStats] = useState<BrainStats | null>(null);
-  const [hydrated, setHydrated] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authVersion, setAuthVersion] = useState(0);
+  const [sessionStatus, setSessionStatus] = useState<"checking" | "authenticated" | "unauthenticated" | "failed">("checking");
   const isAuthRoute = pathname === "/setup";
 
   useEffect(() => {
+    function onAuthChanged(): void {
+      setAuthVersion((version) => version + 1);
+    }
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const nextToken = storedToken();
     setAuthToken(nextToken);
-    setHydrated(true);
-    if (!isAuthRoute && !nextToken) {
-      router.replace("/setup");
+    if (isAuthRoute) {
+      setSessionStatus(nextToken ? "authenticated" : "unauthenticated");
+      return;
     }
-  }, [isAuthRoute, pathname, router]);
+    if (!nextToken) {
+      setSessionStatus("unauthenticated");
+      router.replace("/setup");
+      return;
+    }
 
-  const showChrome = hydrated && Boolean(authToken) && !isAuthRoute;
+    setSessionStatus((current) => (current === "authenticated" ? current : "checking"));
+    fetchMe()
+      .then(() => {
+        if (!cancelled) setSessionStatus("authenticated");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (isUnauthorizedError(error)) {
+          clearStoredToken();
+          setAuthToken(null);
+          setSessionStatus("unauthenticated");
+          router.replace("/setup");
+          return;
+        }
+        setSessionStatus("failed");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authVersion, isAuthRoute, pathname, router]);
+
+  const showChrome = Boolean(authToken) && sessionStatus === "authenticated" && !isAuthRoute;
 
   useEffect(() => {
     if (!showChrome) {
@@ -58,18 +94,28 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
     let cancelled = false;
     async function load(): Promise<void> {
-      const next = await fetchBrainStats();
-      if (!cancelled) setStats(next);
+      try {
+        const next = await fetchBrainStats();
+        if (!cancelled) setStats(next);
+      } catch (error: unknown) {
+        if (cancelled) return;
+        if (isUnauthorizedError(error)) {
+          clearStoredToken();
+          setAuthToken(null);
+          setSessionStatus("unauthenticated");
+          router.replace("/setup");
+        }
+      }
     }
-    void load().catch(() => undefined);
+    void load();
     const interval = window.setInterval(() => {
-      void load().catch(() => undefined);
+      void load();
     }, 10_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [showChrome]);
+  }, [router, showChrome]);
 
   const lastResolved = useMemo(() => {
     return stats?.recentPostmortems[0]?.createdAt;
@@ -80,10 +126,32 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }
 
   if (!showChrome) {
+    const copy =
+      sessionStatus === "failed"
+        ? "Sentinel API is not responding. Refreshing will retry the session check."
+        : sessionStatus === "unauthenticated"
+          ? "Redirecting to setup"
+          : "Checking Sentinel session";
     return (
       <div className="min-h-screen bg-background text-foreground">
         <main className="flex min-h-screen items-center justify-center px-4">
-          <div className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted">Checking session</div>
+          <div className="space-y-3 text-center">
+            <div className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted">{copy}</div>
+            {sessionStatus === "failed" ? (
+              <button
+                type="button"
+                onClick={() => setAuthVersion((version) => version + 1)}
+                className="border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.08em] text-foreground hover:border-active"
+              >
+                Retry
+              </button>
+            ) : null}
+            {sessionStatus === "unauthenticated" ? (
+              <Link href="/setup" className="block font-mono text-[11px] uppercase tracking-[0.08em] text-active">
+                Open setup
+              </Link>
+            ) : null}
+          </div>
         </main>
       </div>
     );

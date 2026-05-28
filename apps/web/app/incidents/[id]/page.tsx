@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { apiUrl, fetchAuditLog, fetchIncident, type AgentEvent, type AuditEntry, type Incident, type Postmortem } from "@/lib/api";
+import { apiUrl, fetchAuditLog, fetchIncident, isUnauthorizedError, type AgentEvent, type AuditEntry, type Incident, type Postmortem } from "@/lib/api";
 
 function severityClass(severity: Incident["severity"]): string {
   if (severity === "P1") return "border-critical bg-critical text-white";
@@ -112,11 +112,14 @@ export default function IncidentDetailPage() {
         setEvents(data.incident.agentEvents ?? []);
       })
       .catch((loadError: unknown) => {
+        if (isUnauthorizedError(loadError)) return;
         setError(loadError instanceof Error ? loadError.message : "Unable to load incident");
       });
     fetchAuditLog(params.id)
       .then((data) => setAuditEntries(data.items))
-      .catch(() => setAuditEntries([]));
+      .catch((loadError: unknown) => {
+        if (!isUnauthorizedError(loadError)) setAuditEntries([]);
+      });
   }, [params.id]);
 
   useEffect(() => {

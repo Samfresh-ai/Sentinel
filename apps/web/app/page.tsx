@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchIncidents, storedToken, type Incident } from "@/lib/api";
+import { fetchIncidents, isUnauthorizedError, storedToken, type Incident } from "@/lib/api";
 
 function severityClass(severity: Incident["severity"]): string {
   if (severity === "P1") return "border-critical bg-critical text-white";
@@ -58,6 +58,7 @@ export default function IncidentFeedPage() {
       setIncidents(response.items);
       setError(null);
     } catch (loadError: unknown) {
+      if (isUnauthorizedError(loadError)) return;
       setError(loadError instanceof Error ? loadError.message : "Unable to load incidents");
     } finally {
       setLoading(false);

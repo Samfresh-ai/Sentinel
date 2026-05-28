@@ -1,6 +1,20 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 export const SPLUNK_DASHBOARD_URL = process.env.NEXT_PUBLIC_SPLUNK_DASHBOARD_URL ?? "http://localhost:8000/en-US/app/sentinel/sentinel_overview";
 export const TOKEN_STORAGE_KEY = "sentinel_token";
+export const AUTH_CHANGED_EVENT = "sentinel-auth-changed";
+const REQUEST_TIMEOUT_MS = 10_000;
+
+export class ApiRequestError extends Error {
+  status: number;
+  body: string;
+
+  constructor(status: number, body: string) {
+    super(body || (status === 0 ? "Sentinel API request timed out" : `Request failed with ${status}`));
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.body = body;
+  }
+}
 
 export interface Incident {
   id: string;
@@ -112,24 +126,61 @@ export interface SplunkOverview {
   serviceHealth: Array<{ service: string; eventCount: number; errorCount: number; errorRate: number }>;
 }
 
+function emitAuthChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
+function responseMessage(status: number, body: string): string {
+  if (status === 401) return "Session expired. Redirecting to setup.";
+  if (!body) return `Request failed with ${status}`;
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.trim().length > 0) return parsed.error;
+    if (typeof parsed.message === "string" && parsed.message.trim().length > 0) return parsed.message;
+  } catch {
+    return body;
+  }
+  return body;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_STORAGE_KEY) : null;
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {})
-    },
-    cache: "no-store"
-  });
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  if (init?.signal) {
+    if (init.signal.aborted) {
+      controller.abort();
+    } else {
+      init.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {})
+      },
+      cache: "no-store",
+      signal: controller.signal
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ApiRequestError(0, `Sentinel API did not answer within ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
   if (!response.ok) {
     const body = await response.text();
     if (response.status === 401 && typeof window !== "undefined") {
-      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-      if (window.location.pathname !== "/setup") window.location.assign("/setup");
+      clearStoredToken();
     }
-    throw new Error(body || `Request failed with ${response.status}`);
+    throw new ApiRequestError(response.status, responseMessage(response.status, body));
   }
   return (await response.json()) as T;
 }
@@ -152,6 +203,17 @@ export function storedToken(): string | null {
 
 export function storeToken(token: string): void {
   window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  emitAuthChanged();
+}
+
+export function clearStoredToken(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  emitAuthChanged();
+}
+
+export function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 401;
 }
 
 export async function fetchIncidents(): Promise<{ items: Incident[]; total: number }> {
