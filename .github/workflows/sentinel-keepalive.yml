@@ -1,0 +1,16 @@
+name: Sentinel Render Keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Sentinel API health
+        run: curl --fail --silent --show-error --max-time 20 https://sentinel-api-n8ly.onrender.com/health
+      - name: Ping Sentinel web shell
+        run: curl --fail --silent --show-error --max-time 20 --header "Accept: text/html" https://sentinel-api-n8ly.onrender.com/
