@@ -1,0 +1,71 @@
+{
+  "generatedAt": "2026-05-28T03:24:12.797Z",
+  "checks": [
+    {
+      "label": "home-desktop",
+      "route": "/",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/home-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: -- incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nINCIDENTS\n\nNewest alerts, agent status, and resolution state.\n\nPOLL: 2S\nLoading incident rows\nSEV\tTITLE\tSERVICES\tSTATUS\tTIME"
+    },
+    {
+      "label": "brain-desktop",
+      "route": "/brain",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/brain-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: 20 incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nRUNTIME GATE\nLocal verification\nNON-PRODUCTION · FAKE ACTION ENABLED · LIVE TIMING\nSENTINEL BRAIN\n20 incidents · 8 runbooks · 5 patterns · Last write: none\nSIMULATE INCIDENT\nSERVICE\nauth-service\nnotification-service\npayment-service\npostgres-main\nredis-cache\nSEVERITY\nP1\nP2\nP3\nP4\nSYMPTOMS\nRUN SIMULATION →\nBRAIN GROWTH\nP2\n1500s\nP3\n780s\nP1\n1980s\nP2\n1260s\nP1\n2040s\nP2\n1140s\nP2\n1380s\nP3\n960s\nP1\n2340s\nP2\n1560s\nRECENT POST-MORTEMS\nTITLE\tINCIDENT\tWRITTEN\nNo post-mortems indexed yet."
+    },
+    {
+      "label": "incidents-desktop",
+      "route": "/incidents",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/incidents-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: -- incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nINCIDENTS\n\nNewest alerts, agent status, and resolution state.\n\nPOLL: 2S\nLoading incident rows\nSEV\tTITLE\tSERVICES\tSTATUS\tTIME"
+    },
+    {
+      "label": "services-desktop",
+      "route": "/services",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/services-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: -- incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nSERVICES\n\nDependency graph and fragile points used by the agent.\n\nauth-service\nidentity-squad\nNode.js\nSLA: 180ms\ndeps: 2\nDEPENDS ON\nredis-cache, postgres-main\nDEPENDENTS\npayment-service\nFRAGILE POINTS\nJWT key refresh, Token introspection cache, PostgreSQL auth pool\nnotification-service\nmessaging-squad\nNode.js\nSLA: 1000ms\ndeps: 1\nDEPENDS ON\npostgres-main\nDEPENDENTS\nNone\nFRAGILE POINTS\nS3 template permissions, Queue lag, Template renderer memory\npayment-service\npayments-squad\nNode.js\nSLA: 300ms\ndeps: 4\nDEPENDS ON\nredis-cache, postgres-main, stripe-api, auth-service\nDEPENDENTS\nNone\nFRAGILE"
+    },
+    {
+      "label": "splunk-desktop",
+      "route": "/splunk",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/splunk-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: -- incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nSPLUNK OPERATIONS\n\nSplunk KV Store memory, HEC audit trail, SPL health, and Sentinel agent decisions inside the product shell.\n\nSURFACE\n/SPLUNK\nSOURCE\nSPL + KV + HEC\nNATIVE VIEW\nLOADING\nACTIVE INCIDENTS\n--\nOpen or in-progress Sentinel incidents.\nBRAIN SIZE\n--\nResolved incidents available as operational memory.\nRESOLUTION TIMELINE - 24H\nSEVERITY DISTRIBUTION\nRECENT AGENT DECISIONS\nTIME\tPHASE\tTOOL\tDURATION\tINCIDENT\nNo audit entries yet.\nSERVICE HEALTH - PROD LOGS\nNo prod log events in the last 15 minutes."
+    },
+    {
+      "label": "brain-mobile",
+      "route": "/brain",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/brain-mobile.png",
+      "bad": [],
+      "textSample": "SENTINEL\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nRUNTIME GATE\nLocal verification\nNON-PRODUCTION · FAKE ACTION ENABLED · LIVE TIMING\nSENTINEL BRAIN\n20 incidents · 8 runbooks · 5 patterns · Last write: none\nSIMULATE INCIDENT\nSERVICE\nauth-service\nnotification-service\npayment-service\npostgres-main\nredis-cache\nSEVERITY\nP1\nP2\nP3\nP4\nSYMPTOMS\nRUN SIMULATION →\nBRAIN GROWTH\nP2\n1500s\nP3\n780s\nP1\n1980s\nP2\n1260s\nP1\n2040s\nP2\n1140s\nP2\n1380s\nP3\n960s\nP1\n2340s\nP2\n1560s\nRECENT POST-MORTEMS\nTITLE\tINCIDENT\tWRITTEN\nNo post-mortems indexed yet."
+    },
+    {
+      "label": "splunk-mobile",
+      "route": "/splunk",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/splunk-mobile.png",
+      "bad": [],
+      "textSample": "SENTINEL\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSPLUNK OPERATIONS\n\nSplunk KV Store memory, HEC audit trail, SPL health, and Sentinel agent decisions inside the product shell.\n\nSURFACE\n/SPLUNK\nSOURCE\nSPL + KV + HEC\nNATIVE VIEW\nLOADING\nACTIVE INCIDENTS\n--\nOpen or in-progress Sentinel incidents.\nBRAIN SIZE\n--\nResolved incidents available as operational memory.\nRESOLUTION TIMELINE - 24H\nSEVERITY DISTRIBUTION\nRECENT AGENT DECISIONS\nTIME\tPHASE\tTOOL\tDURATION\tINCIDENT\nNo audit entries yet.\nSERVICE HEALTH - PROD LOGS\nNo prod log events in the last 15 minutes."
+    },
+    {
+      "label": "incident-detail-desktop",
+      "route": "/incidents/demo-org-seed-incident-20",
+      "title": "Sentinel",
+      "screenshot": "/home/samfresh22/operaiq/artifacts/runtime-clickthrough/incident-detail-desktop.png",
+      "bad": [],
+      "textSample": "SENTINEL\nBrain: -- incidents · Last resolved: none\nINCIDENTS\nBRAIN\nSPLUNK\nSERVICES\nSTATUS\nSPLUNK\nAGENT\nHEC\nPAYMENT-SERVICE\n·\n--\nIncident\nSHOW RAW ALERT ›\nAGENT REASONING PANEL\nSTORED TRACE\nWaiting for live reasoning events.\nRAW DECISION LOG (0 ENTRIES)\nSERVICE GRAPH\npayment-service\n└─ unknown-root ← root cause\n└─ postgres-main\nRUNBOOK\nSteps used in this resolution\nNo remediation steps recorded yet.\nRESOLUTION TIME\n--\nP50 for this pattern: 42s\nPOST-MORTEM\nPost-mortem appears after resolution."
+    }
+  ],
+  "consoleEvents": [],
+  "pageErrors": []
+}
