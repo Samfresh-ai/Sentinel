@@ -798,7 +798,10 @@ export function createApp(): express.Express {
   app.get(
     "/health",
     asyncHandler(async (_req, res) => {
-      const brainSize = await (await incidentsCollection()).countDocuments();
+      const brainSize = await (await incidentsCollection()).countDocuments().catch((error: unknown) => {
+        logger.warn({ error }, "Legacy brain size unavailable during health check");
+        return 0;
+      });
       res.json({ status: "ok", brainSize });
     })
   );
