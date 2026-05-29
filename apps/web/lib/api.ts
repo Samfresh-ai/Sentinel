@@ -2,7 +2,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 export const SPLUNK_DASHBOARD_URL = process.env.NEXT_PUBLIC_SPLUNK_DASHBOARD_URL ?? "http://localhost:8000/en-US/app/sentinel/sentinel_overview";
 export const TOKEN_STORAGE_KEY = "sentinel_token";
 export const AUTH_CHANGED_EVENT = "sentinel-auth-changed";
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export class ApiRequestError extends Error {
   status: number;
@@ -109,6 +109,20 @@ export interface RuntimeReadiness {
   violations: string[];
 }
 
+export interface OrgSummary {
+  orgId: string;
+  orgName: string;
+  adminEmail: string;
+  brainSize: number;
+  webhookUrl: string;
+}
+
+export interface WebhookSecretRotation {
+  orgId: string;
+  webhookUrl: string;
+  rotatedAt: string;
+}
+
 export interface SplunkOverview {
   nativeDashboardUrl: string;
   activeIncidents: number;
@@ -193,8 +207,12 @@ export async function login(input: { email: string; password: string }): Promise
   return requestJson("/auth/login", { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function fetchMe(): Promise<{ orgId: string; orgName: string; adminEmail: string; brainSize: number; webhookUrl: string }> {
+export async function fetchMe(): Promise<OrgSummary> {
   return requestJson("/auth/me");
+}
+
+export async function rotateWebhookSecret(): Promise<WebhookSecretRotation> {
+  return requestJson("/auth/webhook-secret/rotate", { method: "POST" });
 }
 
 export function storedToken(): string | null {

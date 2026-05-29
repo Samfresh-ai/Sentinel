@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import jwt from "jsonwebtoken";
-import { countDocuments, createCollection, createKvKey, getDocument, insertDocument, queryDocuments } from "@operaiq/splunk-brain";
+import { countDocuments, createCollection, createKvKey, getDocument, insertDocument, queryDocuments, updateDocument } from "@operaiq/splunk-brain";
 
 export interface AuthenticatedOrg {
   orgId: string;
@@ -238,6 +238,26 @@ export function authRouter(): Router {
         adminEmail: typeof org?.adminEmail === "string" ? org.adminEmail : "",
         brainSize,
         webhookUrl: `${apiBaseUrl(req)}/webhooks/splunk-alert?orgId=${encodeURIComponent(auth.orgId)}&secret=<shown-once-at-signup>`
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/webhook-secret/rotate", requireAuth, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const auth = req.auth!;
+      const webhookSecret = crypto.randomBytes(32).toString("hex");
+      const rotatedAt = new Date().toISOString();
+      await updateDocument("orgs", auth.orgId, {
+        webhookSecretHash: await bcrypt.hash(webhookSecret, BCRYPT_COST),
+        webhookSecretRotatedAt: rotatedAt,
+        updatedAt: rotatedAt
+      });
+      res.json({
+        orgId: auth.orgId,
+        webhookUrl: webhookUrl(req, auth.orgId, webhookSecret),
+        rotatedAt
       });
     } catch (error) {
       next(error);

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchIncidents, isUnauthorizedError, storedToken, type Incident } from "@/lib/api";
+import { fetchIncidents, fetchMe, isUnauthorizedError, rotateWebhookSecret, storedToken, type Incident, type OrgSummary } from "@/lib/api";
 
 function severityClass(severity: Incident["severity"]): string {
   if (severity === "P1") return "border-critical bg-critical text-white";
@@ -49,6 +49,11 @@ function deriveServices(incident: Incident): string[] {
 export default function IncidentFeedPage() {
   const router = useRouter();
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [orgSummary, setOrgSummary] = useState<OrgSummary | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookBusy, setWebhookBusy] = useState(false);
+  const [webhookCopied, setWebhookCopied] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -65,12 +70,44 @@ export default function IncidentFeedPage() {
     }
   }
 
+  async function loadOrgSummary(): Promise<void> {
+    try {
+      const summary = await fetchMe();
+      setOrgSummary(summary);
+    } catch (loadError: unknown) {
+      if (isUnauthorizedError(loadError)) return;
+      setWebhookError(loadError instanceof Error ? loadError.message : "Unable to load webhook endpoint");
+    }
+  }
+
+  async function generateWebhookUrl(): Promise<void> {
+    setWebhookBusy(true);
+    setWebhookCopied(false);
+    setWebhookError(null);
+    try {
+      const result = await rotateWebhookSecret();
+      setWebhookUrl(result.webhookUrl);
+    } catch (generateError: unknown) {
+      if (isUnauthorizedError(generateError)) return;
+      setWebhookError(generateError instanceof Error ? generateError.message : "Unable to generate webhook URL");
+    } finally {
+      setWebhookBusy(false);
+    }
+  }
+
+  async function copyWebhookUrl(): Promise<void> {
+    if (!webhookUrl) return;
+    await navigator.clipboard.writeText(webhookUrl);
+    setWebhookCopied(true);
+  }
+
   useEffect(() => {
     if (!storedToken()) {
       router.replace("/setup");
       return;
     }
     void load();
+    void loadOrgSummary();
     const interval = window.setInterval(() => {
       void load();
     }, 2_000);
@@ -85,6 +122,39 @@ export default function IncidentFeedPage() {
           <p className="mt-1 text-[13px] text-muted">Newest alerts, agent status, and resolution state.</p>
         </div>
         <div className="font-mono text-[12px] uppercase tracking-[0.06em] text-muted-deep">poll: 2s</div>
+      </section>
+
+      <section className="grid gap-3 border border-border bg-panel p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+        <div className="min-w-0">
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-deep">Splunk webhook</div>
+          <h2 className="mt-1 font-mono text-[14px] uppercase tracking-[0.06em] text-foreground">Alert Action URL for {orgSummary?.orgName ?? "this org"}</h2>
+          <p className="mt-1 max-w-[760px] text-[13px] text-muted">
+            Generate a fresh URL here and paste it into the Splunk saved search webhook action. The secret is shown only when generated, and the previous webhook secret stops working.
+          </p>
+          <div className="mt-3 break-all border border-border bg-background p-3 font-mono text-[12px] text-active">
+            {webhookUrl || orgSummary?.webhookUrl || "Loading webhook endpoint"}
+          </div>
+          {webhookError ? <div className="mt-2 text-[13px] text-critical">{webhookError}</div> : null}
+          {webhookCopied ? <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.08em] text-accent">Webhook URL copied</div> : null}
+        </div>
+        <div className="flex flex-wrap gap-2 md:justify-end">
+          <button
+            type="button"
+            onClick={generateWebhookUrl}
+            disabled={webhookBusy}
+            className="border border-active bg-active px-3 py-2 font-mono text-[11px] uppercase tracking-[0.08em] text-background disabled:cursor-not-allowed disabled:border-border disabled:bg-elevated disabled:text-muted"
+          >
+            {webhookBusy ? "Generating" : "Generate fresh URL"}
+          </button>
+          <button
+            type="button"
+            onClick={copyWebhookUrl}
+            disabled={!webhookUrl}
+            className="border border-border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.08em] text-foreground disabled:cursor-not-allowed disabled:text-muted"
+          >
+            Copy URL
+          </button>
+        </div>
       </section>
 
       <section className="overflow-hidden border border-border bg-panel">
