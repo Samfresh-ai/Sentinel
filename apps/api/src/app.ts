@@ -64,6 +64,11 @@ loadRootEnv();
 
 const logger = createLogger("operaiq-api");
 const rawBodies = new WeakMap<Request, Buffer>();
+const adminRemediationBodySchema = z.object({
+  action: z.enum(["scale_service", "restart_pod", "purge_cache", "rotate_connection_pool", "notify_team"]),
+  targetService: z.string().min(1),
+  parameters: z.record(z.union([z.string(), z.number()])).default({})
+});
 
 function rawBodySaver(req: Request, _res: Response, buf: Buffer): void {
   rawBodies.set(req, Buffer.from(buf));
@@ -894,6 +899,32 @@ export function createApp(): express.Express {
         }
       });
       res.json({ ok: true, result });
+    })
+  );
+
+  app.post(
+    "/admin/remediation",
+    asyncHandler(async (req, res) => {
+      verifyToolSecret(req);
+      const body = adminRemediationBodySchema.parse(req.body);
+      const acceptedAt = new Date().toISOString();
+      const incidentId = typeof body.parameters.incidentId === "string" ? body.parameters.incidentId : null;
+      logger.info(
+        {
+          action: body.action,
+          targetService: body.targetService,
+          incidentId,
+          acceptedAt
+        },
+        "Admin remediation action accepted"
+      );
+      res.json({
+        ok: true,
+        action: body.action,
+        targetService: body.targetService,
+        acceptedAt,
+        output: `Accepted ${body.action} for ${body.targetService}; Sentinel admin endpoint recorded the remediation request.`
+      });
     })
   );
 
