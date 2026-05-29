@@ -285,6 +285,10 @@ function adjustedVerifyCount(input: {
   return input.actualCount;
 }
 
+function splunkEpochSeconds(date: Date): string {
+  return String(Math.floor(date.getTime() / 1000));
+}
+
 function escalationTriggered(input: { bestSimilarityScore: number; remediationAttempts: number }): boolean {
   return (input.bestSimilarityScore < 0.4 && input.remediationAttempts >= 2) || input.remediationAttempts >= 3;
 }
@@ -661,7 +665,8 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         verifyResults.push(failedVerify);
         await updateSentinelIncident(parsed.incidentId, parsed.orgId, { remediationAttempts, verifyResults });
       } else {
-        const verifyInput = { spl: verifySpl, timeRange: { earliest: "-15m", latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
+        const verifyFrom = splunkEpochSeconds(result.executedAt);
+        const verifyInput = { spl: verifySpl, timeRange: { earliest: verifyFrom, latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
         const verifyResult = await auditedPhase(
           {
             orgId: parsed.orgId,
@@ -683,7 +688,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
             toolsCalled.push("query_splunk_logs");
             const latest = await querySplunkLogs({
               spl: verifySpl,
-              timeRange: { earliest: "-15m", latest: "now" },
+              timeRange: { earliest: verifyFrom, latest: "now" },
               description: `Verifying whether ${targetService} cleared after ${action}.`
             });
             remediationAttempts += 1;
