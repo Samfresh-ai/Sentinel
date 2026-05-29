@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Ping Sentinel API health
-        run: curl --fail --silent --show-error --max-time 20 https://sentinel-api-n8ly.onrender.com/health
+        run: |
+          curl --fail --silent --show-error --max-time 60 https://sentinel-api-n8ly.onrender.com/health
       - name: Ping Sentinel web shell
-        run: curl --fail --silent --show-error --max-time 20 --header "Accept: text/html" https://sentinel-api-n8ly.onrender.com/
+        run: |
+          curl --fail --silent --show-error --max-time 60 --header "Accept: text/html" https://sentinel-api-n8ly.onrender.com/
