@@ -174,6 +174,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`${API_URL}${path}`, {
       ...init,
       headers: {
+        Accept: "application/json",
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init?.headers ?? {})
@@ -195,6 +196,18 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       clearStoredToken();
     }
     throw new ApiRequestError(response.status, responseMessage(response.status, body));
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const body = await response.text();
+    const bodyPreview = body.trim().replace(/\s+/g, " ").slice(0, 120);
+    const detail = contentType.toLowerCase().includes("text/html")
+      ? "HTML instead of JSON"
+      : `${contentType || "a non-JSON response"}${bodyPreview ? `: ${bodyPreview}` : ""}`;
+    throw new ApiRequestError(
+      response.status,
+      `Sentinel API returned ${detail} for ${path}`
+    );
   }
   return (await response.json()) as T;
 }

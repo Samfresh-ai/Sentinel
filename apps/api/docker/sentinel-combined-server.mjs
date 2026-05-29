@@ -44,13 +44,14 @@ const web = startChild("sentinel-web", process.execPath, ["apps/web/server.js"],
 function routeToWeb(req) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   const pathname = new URL(req.url ?? "/", "http://sentinel.local").pathname;
+  const acceptsHtml = String(req.headers.accept ?? "").includes("text/html");
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/" || pathname === "/setup") return true;
-  if (pathname === "/brain" || pathname === "/services" || pathname === "/splunk") return true;
+  if (pathname === "/brain" || pathname === "/services" || pathname === "/splunk") return acceptsHtml;
   if (pathname === "/incidents" || pathname.startsWith("/incidents/")) {
-    return String(req.headers.accept ?? "").includes("text/html");
+    return acceptsHtml;
   }
-  return String(req.headers.accept ?? "").includes("text/html") && !pathname.startsWith("/api/");
+  return acceptsHtml && !pathname.startsWith("/api/");
 }
 
 function proxy(req, res, target) {
