@@ -11,3 +11,5 @@ coverage
 *.pid
 vendor/splunk/
 artifacts/runtime/bin/
+artifacts/runtime/*token*.txt
+artifacts/video-lab/*token*.txt

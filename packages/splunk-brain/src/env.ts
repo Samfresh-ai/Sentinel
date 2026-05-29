@@ -5,6 +5,7 @@ loadRootEnv();
 
 const splunkEnvSchema = z.object({
   SPLUNK_HOST: z.string().min(1).default("localhost"),
+  SPLUNK_CLOUD_STACK_HOST: z.string().min(1).optional(),
   SPLUNK_MGMT_URL: z.string().url().optional(),
   SPLUNK_HEC_URL: z.string().url().optional(),
   SPLUNK_MGMT_PORT: z.coerce.number().int().positive().default(8089),

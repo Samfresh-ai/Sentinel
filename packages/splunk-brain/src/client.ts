@@ -12,6 +12,7 @@ export type SplunkConfig = SplunkEnv;
 
 export const SplunkConfigSchema = z.object({
   SPLUNK_HOST: z.string().default("localhost"),
+  SPLUNK_CLOUD_STACK_HOST: z.string().optional(),
   SPLUNK_MGMT_URL: z.string().url().optional(),
   SPLUNK_HEC_URL: z.string().url().optional(),
   SPLUNK_MGMT_PORT: z.number().default(8089),
@@ -53,6 +54,21 @@ function endpointFromUrl(value: string): {
   };
 }
 
+function cloudStackHost(config: SplunkConfig): string | undefined {
+  const raw = config.SPLUNK_CLOUD_STACK_HOST?.trim();
+  if (!raw) return undefined;
+  const withoutProtocol = raw.replace(/^https?:\/\//i, "");
+  const host = withoutProtocol.split("/")[0]?.replace(/:\d+$/, "").toLowerCase();
+  if (!host) return undefined;
+  return host.includes(".") ? host : `${host}.splunkcloud.com`;
+}
+
+function cloudHecHost(stackHost: string): string {
+  if (stackHost.startsWith("http-inputs-") || stackHost.startsWith("http-inputs.")) return stackHost;
+  if (stackHost.endsWith(".splunkcloud.com")) return `http-inputs-${stackHost}`;
+  return `http-inputs-${stackHost}`;
+}
+
 function shouldAllowSelfSigned(endpoint: { host: string }): boolean {
   return isLocalHost(endpoint.host);
 }
@@ -64,6 +80,15 @@ function managementEndpoint(config: SplunkConfig): {
   basePath: string;
 } {
   if (config.SPLUNK_MGMT_URL) return endpointFromUrl(config.SPLUNK_MGMT_URL);
+  const stackHost = cloudStackHost(config);
+  if (stackHost) {
+    return {
+      protocol: "https:",
+      host: stackHost,
+      port: config.SPLUNK_MGMT_PORT,
+      basePath: ""
+    };
+  }
   return {
     protocol: "https:",
     host: config.SPLUNK_HOST,
@@ -79,6 +104,15 @@ function hecEndpoint(config: SplunkConfig): {
   basePath: string;
 } {
   if (config.SPLUNK_HEC_URL) return endpointFromUrl(config.SPLUNK_HEC_URL);
+  const stackHost = cloudStackHost(config);
+  if (stackHost) {
+    return {
+      protocol: "https:",
+      host: cloudHecHost(stackHost),
+      port: config.SPLUNK_HEC_PORT,
+      basePath: ""
+    };
+  }
   return {
     protocol: `${config.SPLUNK_HEC_PROTOCOL}:`,
     host: config.SPLUNK_HOST,
@@ -89,6 +123,7 @@ function hecEndpoint(config: SplunkConfig): {
 
 function accessHeaders(config: SplunkConfig): Record<string, string> {
   const headers: Record<string, string> = {};
+  if (cloudStackHost(config)) return headers;
   if (config.SPLUNK_GATEWAY_TOKEN) {
     headers["x-sentinel-splunk-gateway-token"] = config.SPLUNK_GATEWAY_TOKEN;
   }

@@ -167,6 +167,9 @@ The API refuses production startup when fake-action flags, demo-timing flags, lo
 | `SLACK_DEFAULT_INCIDENT_CHANNEL` | Slack channel ID for incident updates. |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret for approval interactions. |
 | `SPLUNK_HOST` | Splunk Enterprise host for Sentinel, default `localhost`. |
+| `SPLUNK_CLOUD_STACK_HOST` | Preferred hosted Splunk Cloud stack host from Access Instance; Sentinel derives management and HEC endpoints from it. |
+| `SPLUNK_MGMT_URL` | Optional full Splunk management URL; overrides `SPLUNK_CLOUD_STACK_HOST`. |
+| `SPLUNK_HEC_URL` | Optional full Splunk HEC base URL; overrides `SPLUNK_CLOUD_STACK_HOST`. |
 | `SPLUNK_MGMT_PORT` | Splunk management API port, default `8089`. |
 | `SPLUNK_HEC_PORT` | Splunk HTTP Event Collector port, default `8088`. |
 | `SPLUNK_HEC_PROTOCOL` | HEC protocol, default `https`; local self-signed validation is relaxed only for localhost. |

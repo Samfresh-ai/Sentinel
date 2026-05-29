@@ -113,8 +113,9 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
     violations.push("NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
   }
   const splunkHost = envValue(env, "SPLUNK_HOST");
-  const splunkMgmtEndpoint = envValue(env, "SPLUNK_MGMT_URL") || splunkHost;
-  const splunkHecEndpoint = envValue(env, "SPLUNK_HEC_URL") || splunkHost;
+  const splunkCloudStackHost = envValue(env, "SPLUNK_CLOUD_STACK_HOST");
+  const splunkMgmtEndpoint = envValue(env, "SPLUNK_MGMT_URL") || splunkCloudStackHost || splunkHost;
+  const splunkHecEndpoint = envValue(env, "SPLUNK_HEC_URL") || splunkCloudStackHost || splunkHost;
   if (isLocalEndpoint(splunkMgmtEndpoint)) {
     violations.push("SPLUNK_MGMT_URL or SPLUNK_HOST must point to a reachable non-local Splunk management endpoint in production");
   }
@@ -123,6 +124,9 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   }
   for (const key of ["SPLUNK_USERNAME", "SPLUNK_PASSWORD", "SPLUNK_HEC_TOKEN"]) {
     if (!hasEnv(env, key)) violations.push(`${key} is required for production Splunk access`);
+  }
+  if (splunkCloudStackHost && (hasEnv(env, "SPLUNK_GATEWAY_TOKEN") || hasEnv(env, "SPLUNK_CF_ACCESS_CLIENT_ID") || hasEnv(env, "SPLUNK_CF_ACCESS_CLIENT_SECRET"))) {
+    violations.push("SPLUNK_CLOUD_STACK_HOST should not be combined with local tunnel gateway or Cloudflare Access Splunk variables");
   }
   return violations;
 }

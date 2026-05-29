@@ -8,7 +8,9 @@ function writeLine(line: string): void {
 
 async function main(): Promise<void> {
   const config = getSplunkConfig();
-  writeLine(`CHECK splunk-config - host=${config.SPLUNK_HOST}, mgmtPort=${config.SPLUNK_MGMT_PORT}, hecPort=${config.SPLUNK_HEC_PORT}, app=${config.SPLUNK_APP}, index=${config.SPLUNK_INDEX}`);
+  writeLine(
+    `CHECK splunk-config - host=${config.SPLUNK_HOST}, cloudStack=${config.SPLUNK_CLOUD_STACK_HOST ?? "unset"}, mgmtPort=${config.SPLUNK_MGMT_PORT}, hecPort=${config.SPLUNK_HEC_PORT}, app=${config.SPLUNK_APP}, index=${config.SPLUNK_INDEX}`
+  );
 
   await splunkRestRequest(z.record(z.unknown()), {
     path: "/services/server/info",
