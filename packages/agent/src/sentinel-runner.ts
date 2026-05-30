@@ -72,7 +72,7 @@ async function auditedPhase<T>(
   confidenceScoreForAudit: (result: T) => number | null = () => null
 ): Promise<T> {
   const startedAt = Date.now();
-  void writeAuditEntry({
+  await writeAuditEntry({
     orgId: context.orgId,
     incidentId: context.incidentId,
     timestamp: new Date().toISOString(),
@@ -87,7 +87,7 @@ async function auditedPhase<T>(
   });
   try {
     const result = await run();
-    void writeAuditEntry({
+    await writeAuditEntry({
       orgId: context.orgId,
       incidentId: context.incidentId,
       timestamp: new Date().toISOString(),
@@ -102,7 +102,7 @@ async function auditedPhase<T>(
     });
     return result;
   } catch (error: unknown) {
-    void writeAuditEntry({
+    await writeAuditEntry({
       orgId: context.orgId,
       incidentId: context.incidentId,
       timestamp: new Date().toISOString(),
@@ -378,7 +378,7 @@ async function writeDeadLetter(input: {
       createdAt: now
     });
   }
-  void writeAuditEntry({
+  await writeAuditEntry({
     orgId: input.orgId,
     incidentId: input.incidentId,
     timestamp: now,

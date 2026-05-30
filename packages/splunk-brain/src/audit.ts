@@ -80,9 +80,7 @@ export async function writeAuditEntry(entry: Omit<AuditEntry, "_key">): Promise<
       input: truncateRecord(entry.input),
       output: truncateRecord(entry.output)
     });
-    void persistAuditEntry(parsed).catch((error: unknown) => {
-      logger.warn({ error, incidentId: parsed.incidentId, phase: parsed.phase }, "Sentinel audit write failed");
-    });
+    await persistAuditEntry(parsed);
   } catch (error: unknown) {
     logger.warn({ error }, "Sentinel audit entry rejected");
   }
