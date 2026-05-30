@@ -285,8 +285,8 @@ function adjustedVerifyCount(input: {
   return input.actualCount;
 }
 
-function splunkEpochSeconds(date: Date): string {
-  return String(Math.floor(date.getTime() / 1000));
+function splunkEpochSeconds(date: Date, backoffMs = 0): string {
+  return String(Math.floor(Math.max(0, date.getTime() - backoffMs) / 1000));
 }
 
 function escalationTriggered(input: { bestSimilarityScore: number; remediationAttempts: number }): boolean {
@@ -303,7 +303,7 @@ async function writeEscalationPostmortem(input: {
   title: string;
   severity: string;
   symptoms: string[];
-  timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }>;
   rootCauseSuspected: string | null;
   remediationsTried: string[];
   verifyResults: Array<{ timestamp: string; errorCount: number; passed: boolean }>;
@@ -401,9 +401,9 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
   const verifyFailsBeforePass = typeof rawInput.verifyFailsBeforePass === "number" ? rawInput.verifyFailsBeforePass : undefined;
   const forceCrashPhase = typeof rawInput.forceCrashPhase === "string" ? rawInput.forceCrashPhase : undefined;
   const toolsCalled: string[] = [];
-  const timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "human" }> = [];
+  const timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }> = [];
   const addTimeline = (event: string): void => {
-    timeline.push({ timestamp: new Date().toISOString(), event, actor: "operaiq" });
+    timeline.push({ timestamp: new Date().toISOString(), event, actor: "sentinel" });
   };
 
   process.env.SENTINEL_MODE = "true";
@@ -665,7 +665,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         verifyResults.push(failedVerify);
         await updateSentinelIncident(parsed.incidentId, parsed.orgId, { remediationAttempts, verifyResults });
       } else {
-        const verifyFrom = splunkEpochSeconds(result.executedAt);
+        const verifyFrom = splunkEpochSeconds(result.executedAt, 5_000);
         const verifyInput = { spl: verifySpl, timeRange: { earliest: verifyFrom, latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
         const verifyResult = await auditedPhase(
           {

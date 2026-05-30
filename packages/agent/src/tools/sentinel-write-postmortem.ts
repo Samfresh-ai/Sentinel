@@ -12,7 +12,7 @@ export const sentinelWritePostmortemInputSchema = z.object({
     z.object({
       timestamp: z.string().datetime(),
       event: z.string().min(1),
-      actor: z.enum(["operaiq", "human"])
+      actor: z.enum(["sentinel", "operaiq", "human"])
     })
   ).min(1),
   rootCause: z.string().min(5),

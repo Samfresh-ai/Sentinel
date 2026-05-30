@@ -39,6 +39,7 @@ import {
 } from "@operaiq/splunk-brain";
 import {
   createLogger,
+  isProductionRuntime,
   runtimeReadiness,
   normalizeAlertPayload,
   paginationQuerySchema,
@@ -62,7 +63,7 @@ import { authRouter, requireAuth, verifyAuth, verifyWebhookOrg, type Authenticat
 
 loadRootEnv();
 
-const logger = createLogger("operaiq-api");
+const logger = createLogger("sentinel-api");
 const rawBodies = new WeakMap<Request, Buffer>();
 const adminRemediationBodySchema = z.object({
   action: z.enum(["scale_service", "restart_pod", "purge_cache", "rotate_connection_pool", "notify_team"]),
@@ -84,12 +85,45 @@ function dependencyUnavailable(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ECONNREFUSED";
 }
 
+function configuredCorsOrigins(): Set<string> {
+  const values = [
+    process.env.PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_API_URL,
+    process.env.API_PUBLIC_URL,
+    process.env.AGENT_TOOL_EXECUTION_BASE_URL,
+    ...(process.env.CORS_ALLOWED_ORIGINS ?? "").split(",")
+  ];
+  return new Set(
+    values
+      .map((value) => value?.trim().replace(/\/+$/, ""))
+      .filter((value): value is string => Boolean(value))
+  );
+}
+
+type CorsOriginCallback = (error: Error | null, allow?: boolean) => void;
+
+function corsOptions(): Parameters<typeof cors>[0] {
+  if (!isProductionRuntime()) return {};
+  const allowedOrigins = configuredCorsOrigins();
+  return {
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "x-sentinel-secret", "x-sentinel-tool-secret", "x-operaiq-secret", "x-operaiq-tool-secret"],
+    origin(origin: string | undefined, callback: CorsOriginCallback) {
+      if (!origin || allowedOrigins.has(origin.replace(/\/+$/, ""))) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("CORS origin is not allowed by Sentinel"));
+    }
+  };
+}
+
 function verifyWebhookSecret(req: Request): void {
   const expected = process.env.WEBHOOK_SECRET;
   if (!expected) {
     throw new Error("WEBHOOK_SECRET is not configured");
   }
-  const actual = req.header("x-operaiq-secret") ?? "";
+  const actual = req.header("x-sentinel-secret") ?? req.header("x-operaiq-secret") ?? "";
   const expectedBuffer = Buffer.from(expected);
   const actualBuffer = Buffer.from(actual);
   if (expectedBuffer.length !== actualBuffer.length || !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
@@ -105,7 +139,7 @@ function verifyToolSecret(req: Request): void {
     throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required for agent tool execution");
   }
   const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const explicit = req.header("x-operaiq-tool-secret") ?? "";
+  const explicit = req.header("x-sentinel-tool-secret") ?? req.header("x-operaiq-tool-secret") ?? "";
   const actual = bearer.length > 0 ? bearer : explicit;
   const expectedBuffer = Buffer.from(expected);
   const actualBuffer = Buffer.from(actual);
@@ -201,7 +235,7 @@ function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
   if (payload.search_name === SENTINEL_AUTONOMOUS_PAYMENT_SEARCH || payload.search_name === "sentinel_demo_payment_redis_spike") {
     const errorCount = splunkResultString(payload, "error_count") ?? splunkResultString(payload, "count");
     return {
-      source: "operaiq",
+      source: "sentinel",
       title: `Splunk alert: ${payload.search_name}`,
       severity: "P3",
       affectedServices: ["payment-service"],
@@ -226,7 +260,7 @@ function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
     splunkResultString(payload, "_raw")
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   return {
-    source: "operaiq",
+    source: "sentinel",
     title: `Splunk alert: ${payload.search_name}`,
     severity: severityFromSplunk(splunkResultString(payload, "severity") ?? payload.configuration?.severity),
     affectedServices: [service],
@@ -237,7 +271,12 @@ function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
   };
 }
 
-function demoRemediationWaitMs(req: Request, payload: SplunkAlertPayload): number | undefined {
+function testControlsAllowed(): boolean {
+  return process.env.SENTINEL_TEST_CONTROLS?.toLowerCase() === "true" && !isProductionRuntime();
+}
+
+function testControlRemediationWaitMs(req: Request, payload: SplunkAlertPayload): number | undefined {
+  if (!testControlsAllowed()) return undefined;
   const value = req.header("x-sentinel-demo-remediation-wait-ms");
   if (!value) return undefined;
   const isDemoAlert =
@@ -248,7 +287,8 @@ function demoRemediationWaitMs(req: Request, payload: SplunkAlertPayload): numbe
   return parsed;
 }
 
-function demoVerifyFailsBeforePass(req: Request, payload: SplunkAlertPayload): number | undefined {
+function testControlVerifyFailsBeforePass(req: Request, payload: SplunkAlertPayload): number | undefined {
+  if (!testControlsAllowed()) return undefined;
   const value = req.header("x-sentinel-verify-fails-before-pass");
   if (!value) return undefined;
   const isDemoAlert =
@@ -259,7 +299,8 @@ function demoVerifyFailsBeforePass(req: Request, payload: SplunkAlertPayload): n
   return parsed;
 }
 
-function demoForceCrashPhase(req: Request, payload: SplunkAlertPayload): string | undefined {
+function testControlForceCrashPhase(req: Request, payload: SplunkAlertPayload): string | undefined {
+  if (!testControlsAllowed()) return undefined;
   const value = req.header("x-sentinel-force-crash-phase");
   if (!value) return undefined;
   if (!payload.search_name.startsWith("sentinel_demo_")) return undefined;
@@ -432,6 +473,10 @@ function serializeSentinelService(service: Record<string, unknown>): Record<stri
   };
 }
 
+function severityForAlert(value: unknown): NormalizedAlert["severity"] {
+  return value === "P1" || value === "P2" || value === "P3" || value === "P4" ? value : "P2";
+}
+
 async function listSentinelIncidents(limit: number, orgId: string): Promise<Record<string, unknown>[]> {
   try {
     const docs = await queryDocuments<Record<string, unknown>>("incidents", {}, limit, { orgId });
@@ -558,19 +603,9 @@ async function getSentinelIncidentView(id: string, orgId: string): Promise<{
   };
 }
 
-function severityForAlert(value: unknown): NormalizedAlert["severity"] {
-  return value === "P1" || value === "P2" || value === "P3" || value === "P4" ? value : "P2";
-}
-
-const sentinelSimulationSchema = z.object({
-  service: z.string().min(1),
-  severity: z.enum(["P1", "P2", "P3", "P4"]),
-  symptoms: z.array(z.string().min(1)).min(1)
-});
-
 function alertFromSentinelIncident(incident: Record<string, unknown>): NormalizedAlert {
   return {
-    source: "operaiq",
+    source: "sentinel",
     title: asString(incident.title),
     severity: severityForAlert(incident.severity),
     affectedServices: asStringArray(incident.affectedServices).length > 0 ? asStringArray(incident.affectedServices) : ["unknown-service"],
@@ -752,7 +787,7 @@ function toolOpenApiDocument(): Record<string, unknown> {
   return {
     openapi: "3.1.0",
     info: {
-      title: "OperaIQ Agent Tools",
+      title: "Sentinel Agent Tools",
       version: "0.1.0"
     },
     servers: [
@@ -775,7 +810,7 @@ function toolOpenApiDocument(): Record<string, unknown> {
 export function createApp(): express.Express {
   const app = express();
   app.use(helmet());
-  app.use(cors());
+  app.use(cors(corsOptions()));
   app.use((req, res, next) => {
     const startedAt = Date.now();
     res.on("finish", () => {
@@ -838,9 +873,9 @@ export function createApp(): express.Express {
         return;
       }
       const alert = normalizeSplunkAlert(payload);
-      const remediationWaitMs = demoRemediationWaitMs(req, payload);
-      const verifyFailsBeforePass = demoVerifyFailsBeforePass(req, payload);
-      const forceCrashPhase = demoForceCrashPhase(req, payload);
+      const remediationWaitMs = testControlRemediationWaitMs(req, payload);
+      const verifyFailsBeforePass = testControlVerifyFailsBeforePass(req, payload);
+      const forceCrashPhase = testControlForceCrashPhase(req, payload);
       const incidentId = await createSentinelIncidentFromAlert(alert, org.orgId);
       setImmediate(() => {
         runSentinelForIncident({
@@ -882,9 +917,9 @@ export function createApp(): express.Express {
       }
       const payloadField = typeof req.body.payload === "string" ? req.body.payload : "";
       const payload = JSON.parse(payloadField) as { actions?: Array<{ action_id?: string; value?: string }> };
-      const action = payload.actions?.find((item) => item.action_id === "operaiq_approve_remediation");
+      const action = payload.actions?.find((item) => item.action_id === "sentinel_approve_remediation" || item.action_id === "operaiq_approve_remediation");
       if (!action?.value) {
-        res.status(400).json({ error: "No OperaIQ approval action found" });
+        res.status(400).json({ error: "No Sentinel approval action found" });
         return;
       }
       const approved = JSON.parse(action.value) as {
@@ -1190,32 +1225,6 @@ export function createApp(): express.Express {
         recentAgentDecisions,
         serviceHealth
       });
-    })
-  );
-
-  app.post(
-    "/simulate",
-    requireAuth,
-    asyncHandler(async (req, res) => {
-      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
-      const body = sentinelSimulationSchema.parse(req.body);
-      const alert: NormalizedAlert = {
-        source: "operaiq",
-        title: `Simulated Sentinel incident: ${body.service}`,
-        severity: body.severity,
-        affectedServices: [body.service],
-        symptoms: body.symptoms,
-        incidentType: `sentinel_sim_${body.service.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`,
-        detectedAt: new Date().toISOString(),
-        rawPayload: { source: "sentinel-ui-simulate", ...body }
-      };
-      const incidentId = await createSentinelIncidentFromAlert(alert, auth.orgId);
-      setImmediate(() => {
-        runSentinelForIncident({ incidentId, orgId: auth.orgId, alert }).catch((error: unknown) => {
-          logger.error({ incidentId, error }, "Sentinel simulation failed");
-        });
-      });
-      res.status(202).json({ incidentId, status: "open", trigger: "sentinel-simulate" });
     })
   );
 

@@ -45,7 +45,7 @@ async function checkMongo(): Promise<{ ok: boolean; detail: string }> {
   }
   const client = new MongoClient(process.env.MONGODB_ATLAS_URI!, { serverSelectionTimeoutMS: 5000 });
   try {
-    await client.db(process.env.MONGODB_DATABASE_NAME ?? "operaiq").command({ ping: 1 });
+    await client.db(process.env.MONGODB_DATABASE_NAME ?? "sentinel").command({ ping: 1 });
     return { ok: true, detail: "Atlas ping succeeded" };
   } catch (error: unknown) {
     return { ok: false, detail: error instanceof Error ? error.message : "MongoDB ping failed" };
@@ -170,8 +170,8 @@ async function main(): Promise<void> {
   }
   checks.push({ name: "mongodb-atlas", ...(await checkMongo()) });
   if (usesPubSub) {
-    checks.push({ name: "pubsub-alert-topic", ...(await checkPubSubTopic(process.env.PUBSUB_ALERT_TOPIC ?? "operaiq-alerts")) });
-    checks.push({ name: "pubsub-events-topic", ...(await checkPubSubTopic(process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events")) });
+    checks.push({ name: "pubsub-alert-topic", ...(await checkPubSubTopic(process.env.PUBSUB_ALERT_TOPIC ?? "sentinel-alerts")) });
+    checks.push({ name: "pubsub-events-topic", ...(await checkPubSubTopic(process.env.PUBSUB_EVENTS_TOPIC ?? "sentinel-agent-events")) });
   } else {
     checks.push({ name: "pubsub", ok: true, detail: "skipped because Sentinel uses Splunk Alert Action webhooks" });
   }

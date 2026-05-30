@@ -1,36 +1,14 @@
-# Sentinel Render API Deployment
+# Sentinel Render Deployment
 
-Render is viable as the single Sentinel service. The current simple shape is one
-Docker web service that serves both the API and the built web UI.
+Render can run Sentinel, but keep the web URL and API URL conceptually separate. The API is what Splunk calls. The live URL is what users and judges open.
 
-## Accepted Shape
+## Preferred Shape
 
-- `sentinel-api`: Docker web service from `apps/api/Dockerfile`, health check `/health`, serving both API routes and the Sentinel web UI.
-- Splunk target: Splunk Cloud, an externally reachable Splunk Enterprise host, or a protected tunnel to the verified local Splunk instance.
+- `sentinel-api`: Docker web service from `apps/api/Dockerfile`, health check `/health`.
+- `sentinel-web`: static/web service from `apps/web/Dockerfile` or another host, pointed at `sentinel-api`.
+- Splunk target: Splunk Cloud, externally reachable Splunk Enterprise, or a protected tunnel to the verified local Splunk Enterprise instance.
 
-Do not deploy Sentinel production with `SPLUNK_HOST=localhost`. The runtime gate blocks that because the public API would not have the required path:
-
-```text
-app logs -> Splunk HEC -> Splunk saved search -> webhook -> Sentinel ACT/VERIFY/CLOSE
-```
-
-## Render Fit Notes
-
-Render web services are a fit for `sentinel-api`: Docker builds are supported
-and public HTTPS service URLs are generated.
-
-Splunk is the hard part. The simple production shape is Splunk Cloud plus the
-single Render `sentinel-api` service. Use the local Cloudflare tunnel only while
-Splunk Cloud access is still pending.
-
-When the Splunk portal enables **Access Instance**, copy the stack host from the
-Splunk Cloud URL and set `SPLUNK_CLOUD_STACK_HOST`. Sentinel derives:
-
-- management API through Splunk Web: `https://<stack-host>/en-US/splunkd`
-- HEC: `https://<stack-host>:8088`
-
-If Splunk shows a different REST or HEC host, set `SPLUNK_MGMT_URL` or
-`SPLUNK_HEC_URL` explicitly.
+The temporary combined shape still works because `apps/api/Dockerfile` serves the built web UI and API from one service, but do not depend on that as the final architecture if separate URLs are available.
 
 ## Required API Variables
 
@@ -47,61 +25,76 @@ MONGODB_DATABASE_NAME=sentinel
 JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>
-PUBLIC_APP_URL=https://<sentinel-api>.onrender.com
-NEXT_PUBLIC_API_URL=https://<sentinel-api>.onrender.com
-AGENT_TOOL_EXECUTION_BASE_URL=https://<sentinel-api>.onrender.com
-SPLUNK_HOST=localhost
-SPLUNK_CLOUD_STACK_HOST=<stack>.splunkcloud.com
-SPLUNK_MGMT_URL=
-SPLUNK_HEC_URL=
-SPLUNK_MGMT_PORT=8089
-SPLUNK_HEC_PORT=8088
-SPLUNK_HEC_PROTOCOL=https
-SPLUNK_CA_CERT=<optional PEM CA for private Splunk HEC certificates>
-SPLUNK_USERNAME=<secret>
-SPLUNK_PASSWORD=<secret>
-SPLUNK_HEC_TOKEN=<secret>
-SPLUNK_GATEWAY_TOKEN=
-SPLUNK_CF_ACCESS_CLIENT_ID=
-SPLUNK_CF_ACCESS_CLIENT_SECRET=
+PUBLIC_APP_URL=https://<sentinel-live-url>
+API_PUBLIC_URL=https://<sentinel-api-url>
+NEXT_PUBLIC_API_URL=https://<sentinel-api-url>
+AGENT_TOOL_EXECUTION_BASE_URL=https://<sentinel-api-url>
 SPLUNK_APP=sentinel
 SPLUNK_INDEX=sentinel
 SPLUNK_DASHBOARD_URL=https://<splunk-web>/en-US/app/sentinel/sentinel_overview
 ```
 
-## Manual Order
+Monitor both URLs with UptimeRobot or an equivalent external monitor:
 
-1. Create `sentinel-api` as a Docker web service using `apps/api/Dockerfile`.
-2. Add all API variables. Generate random values for `JWT_SECRET`, `WEBHOOK_SECRET`, and `AGENT_TOOL_SECRET`.
-3. Open `/runtime/readiness` on the API. It must return `autonomous-ready`, not `production-blocked`.
-4. Use the web setup screen to create the Sentinel org and copy the webhook URL into a Splunk saved search.
-5. Run the strict acceptance proof from a real app log source: logs to HEC, Splunk saved search fires webhook, Sentinel reaches `ACT`, `VERIFY`, and `CLOSE`.
+```text
+GET https://<sentinel-api-url>/health
+GET https://<sentinel-live-url>/
+```
 
-## Cloud Cutover
+## Splunk Enterprise Local Test Target
 
-1. In Splunk support, wait until the trial row has **Access Instance** enabled.
-2. Open the instance and copy the stack host from the browser URL.
-3. In Splunk Web, enable HEC and create a token for the `sentinel` index.
-4. In Render, set `SPLUNK_CLOUD_STACK_HOST`, `SPLUNK_USERNAME`,
-   `SPLUNK_PASSWORD`, and `SPLUNK_HEC_TOKEN`. For SAM's current trial stack,
-   `SPLUNK_CLOUD_STACK_HOST=prd-p-310zp.splunkcloud.com`; HEC health is on
-   `https://prd-p-310zp.splunkcloud.com:8088/services/collector/health`.
-   This trial HEC endpoint presents Splunk's private CA, so set
-   `SPLUNK_CA_CERT` to the Splunk Common CA PEM. Sentinel will validate the
-   certificate chain against that CA while accepting Splunk HEC's generic
-   certificate name.
-5. In Render, clear `SPLUNK_MGMT_URL`, `SPLUNK_HEC_URL`,
-   `SPLUNK_GATEWAY_TOKEN`, `SPLUNK_CF_ACCESS_CLIENT_ID`, and
-   `SPLUNK_CF_ACCESS_CLIENT_SECRET`.
-6. Redeploy and verify `/runtime/readiness`, `pnpm splunk:setup-check`, and a
-   live Splunk saved-search webhook.
+For local Enterprise testing through the protected tunnel:
 
-## Current Blocker
+```text
+SPLUNK_HOST=splunk.paysmat.xyz
+SPLUNK_MGMT_URL=https://splunk.paysmat.xyz
+SPLUNK_HEC_URL=https://splunk.paysmat.xyz
+SPLUNK_MGMT_PORT=8089
+SPLUNK_HEC_PORT=8088
+SPLUNK_HEC_PROTOCOL=https
+SPLUNK_USERNAME=<secret>
+SPLUNK_PASSWORD=<secret>
+SPLUNK_HEC_TOKEN=<secret>
+SPLUNK_GATEWAY_TOKEN=<secret>
+SPLUNK_CF_ACCESS_CLIENT_ID=
+SPLUNK_CF_ACCESS_CLIENT_SECRET=
+```
 
-The local verified Splunk instance is `localhost`, which Render cannot use
-directly. Deployment should pause before final submission until one of these is
-true:
+This is acceptable for local proof only while the tunnel and Splunk process are supervised.
 
-- Splunk Cloud credentials are available.
-- A reachable external Splunk Enterprise host is available.
-- A protected tunnel to local Splunk is running and supervised for the full demo window.
+## Splunk Cloud Cutover
+
+Once Splunk Cloud access is available, use the Cloud stack instead of the local tunnel:
+
+```text
+SPLUNK_CLOUD_STACK_HOST=<stack>.splunkcloud.com
+SPLUNK_USERNAME=<secret>
+SPLUNK_PASSWORD=<secret>
+SPLUNK_HEC_TOKEN=<secret>
+SPLUNK_CA_CERT=<optional PEM CA if required>
+SPLUNK_MGMT_URL=
+SPLUNK_HEC_URL=
+SPLUNK_GATEWAY_TOKEN=
+SPLUNK_CF_ACCESS_CLIENT_ID=
+SPLUNK_CF_ACCESS_CLIENT_SECRET=
+```
+
+Sentinel derives management API through Splunk Web and HEC on `:8088`. If Splunk provides separate REST/HEC endpoints, set `SPLUNK_MGMT_URL` and `SPLUNK_HEC_URL` explicitly.
+
+## Readiness
+
+Before submission:
+
+1. Open `/runtime/readiness`; it must return `autonomous-ready`.
+2. Run Splunk setup checks against the target Splunk instance.
+3. Run the direct human-flow proof:
+
+```bash
+./node_modules/.bin/tsx --conditions=development scripts/sentinel-human-flow.ts
+```
+
+The required proof path is:
+
+```text
+app logs -> Splunk HEC -> Splunk saved search -> webhook -> Sentinel ACT/VERIFY/CLOSE
+```

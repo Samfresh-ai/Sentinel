@@ -239,7 +239,7 @@ async function postSlackMessage(config: ServiceExecutionConfig, input: {
               targetService: input.targetService,
               parameters: input.parameters
             }),
-            action_id: "operaiq_approve_remediation"
+            action_id: "sentinel_approve_remediation"
           }
         ]
       }
@@ -314,7 +314,7 @@ async function dispatchAdminEndpoint(
     headers: {
       Authorization: `Bearer ${secret}`,
       "Content-Type": "application/json",
-      "x-operaiq-tool-secret": secret
+      "x-sentinel-tool-secret": secret
     },
     body: JSON.stringify({
       action,

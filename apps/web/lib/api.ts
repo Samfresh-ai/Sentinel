@@ -70,7 +70,7 @@ export interface Postmortem {
   incidentId: string;
   title: string;
   summary: string;
-  timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }>;
   rootCause: string;
   contributingFactors: string[];
   remediationTaken: string[];
@@ -212,7 +212,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function signup(input: { orgName: string; adminEmail: string; adminPassword: string }): Promise<{ token: string; orgId: string; webhookUrl: string; webhookSecret: string }> {
+export async function signup(input: { orgName: string; adminEmail: string; adminPassword: string }): Promise<{ token: string; orgId: string; webhookUrl: string }> {
   return requestJson("/auth/signup", { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -273,13 +273,6 @@ export async function fetchRuntimeReadiness(): Promise<RuntimeReadiness> {
 
 export async function fetchSplunkOverview(): Promise<SplunkOverview> {
   return requestJson<SplunkOverview>("/splunk/overview");
-}
-
-export async function simulateIncident(input: { service: string; symptoms: string[]; severity: "P1" | "P2" | "P3" | "P4" }): Promise<{ incidentId: string }> {
-  return requestJson<{ incidentId: string }>("/simulate", {
-    method: "POST",
-    body: JSON.stringify(input)
-  });
 }
 
 export function apiUrl(path: string): string {

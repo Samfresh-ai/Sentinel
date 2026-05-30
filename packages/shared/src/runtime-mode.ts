@@ -58,7 +58,7 @@ export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env): boole
   if (booleanEnv(env, "SENTINEL_PRODUCTION_MODE")) return true;
   if (envValue(env, "NODE_ENV").toLowerCase() !== "production") return false;
   const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
-  const apiUrl = envValue(env, "NEXT_PUBLIC_API_URL");
+  const apiUrl = envValue(env, "API_PUBLIC_URL") || envValue(env, "NEXT_PUBLIC_API_URL");
   return !(publicAppUrl.length > 0 && apiUrl.length > 0 && isLocalUrl(publicAppUrl) && isLocalUrl(apiUrl));
 }
 
@@ -74,7 +74,7 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
     violations.push("OPERAIQ_LOCAL_VERIFY=true records remediation instead of dispatching real action");
   }
   if (isDemoTimingMode(env)) {
-    violations.push("DEMO_REMEDIATION_WAIT_MS is set and can alter demo verification timing");
+    violations.push("DEMO_REMEDIATION_WAIT_MS is set and can alter Sentinel verification timing");
   }
   if (envValue(env, "OPERAIQ_AI_PROVIDER").toLowerCase() === "offline") {
     violations.push("OPERAIQ_AI_PROVIDER=offline is deterministic test reasoning, not production reasoning");
@@ -108,9 +108,9 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   if (!publicAppUrl || isLocalUrl(publicAppUrl)) {
     violations.push("PUBLIC_APP_URL must be the public Sentinel web URL");
   }
-  const apiUrl = envValue(env, "NEXT_PUBLIC_API_URL");
+  const apiUrl = envValue(env, "API_PUBLIC_URL") || envValue(env, "NEXT_PUBLIC_API_URL");
   if (!apiUrl || isLocalUrl(apiUrl)) {
-    violations.push("NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
+    violations.push("API_PUBLIC_URL or NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
   }
   const splunkHost = envValue(env, "SPLUNK_HOST");
   const splunkCloudStackHost = envValue(env, "SPLUNK_CLOUD_STACK_HOST");

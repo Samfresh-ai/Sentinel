@@ -67,10 +67,10 @@ function resolvePushEndpoint(apiUrl: string): string {
 async function main(): Promise<void> {
   const projectId = requiredEnv("GOOGLE_CLOUD_PROJECT_ID");
   const apiUrl = requiredEnv("NEXT_PUBLIC_API_URL").replace(/\/$/, "");
-  const alertTopicName = process.env.PUBSUB_ALERT_TOPIC ?? "operaiq-alerts";
-  const eventsTopicName = process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events";
-  const alertSubscriptionName = process.env.PUBSUB_ALERT_PUSH_SUBSCRIPTION ?? "operaiq-alerts-agent-push";
-  const eventsSubscriptionName = process.env.PUBSUB_EVENTS_SUBSCRIPTION ?? "operaiq-agent-events-sse";
+  const alertTopicName = process.env.PUBSUB_ALERT_TOPIC ?? "sentinel-alerts";
+  const eventsTopicName = process.env.PUBSUB_EVENTS_TOPIC ?? "sentinel-agent-events";
+  const alertSubscriptionName = process.env.PUBSUB_ALERT_PUSH_SUBSCRIPTION ?? "sentinel-alerts-agent-push";
+  const eventsSubscriptionName = process.env.PUBSUB_EVENTS_SUBSCRIPTION ?? "sentinel-agent-events-sse";
   const pushEndpoint = resolvePushEndpoint(apiUrl);
 
   const pubsub = new PubSub({ projectId });

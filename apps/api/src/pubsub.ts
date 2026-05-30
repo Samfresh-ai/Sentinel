@@ -12,7 +12,7 @@ function client(): PubSub {
 }
 
 export async function publishAlertEvent(payload: { incidentId: string; alert: unknown }): Promise<string> {
-  const topicName = process.env.PUBSUB_ALERT_TOPIC ?? "operaiq-alerts";
+  const topicName = process.env.PUBSUB_ALERT_TOPIC ?? "sentinel-alerts";
   const messageId = await client().topic(topicName).publishMessage({
     json: payload
   });
@@ -20,7 +20,7 @@ export async function publishAlertEvent(payload: { incidentId: string; alert: un
 }
 
 export async function publishAgentEvent(event: AgentEvent): Promise<string> {
-  const topicName = process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events";
+  const topicName = process.env.PUBSUB_EVENTS_TOPIC ?? "sentinel-agent-events";
   return client().topic(topicName).publishMessage({ json: event });
 }
 
@@ -57,8 +57,8 @@ export function dispatchAgentEvent(event: AgentEvent): void {
 export async function startAgentEventsSubscription(): Promise<void> {
   if (eventsSubscriptionStarted) return;
   eventsSubscriptionStarted = true;
-  const topicName = process.env.PUBSUB_EVENTS_TOPIC ?? "operaiq-agent-events";
-  const subscriptionName = process.env.PUBSUB_EVENTS_SUBSCRIPTION ?? "operaiq-agent-events-sse";
+  const topicName = process.env.PUBSUB_EVENTS_TOPIC ?? "sentinel-agent-events";
+  const subscriptionName = process.env.PUBSUB_EVENTS_SUBSCRIPTION ?? "sentinel-agent-events-sse";
   const topic = client().topic(topicName);
   const [exists] = await topic.subscription(subscriptionName).exists();
   if (!exists) {

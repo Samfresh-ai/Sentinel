@@ -197,7 +197,7 @@ export function authRouter(): Router {
         createdAt: now,
         updatedAt: now
       });
-      res.status(201).json({ token: signToken({ orgId, userId, orgName }), orgId, webhookUrl: webhookUrl(req, orgId, webhookSecret), webhookSecret });
+      res.status(201).json({ token: signToken({ orgId, userId, orgName }), orgId, webhookUrl: webhookUrl(req, orgId, webhookSecret) });
     } catch (error) {
       next(error);
     }

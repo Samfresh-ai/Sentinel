@@ -12,7 +12,7 @@ const optionalUrl = z.preprocess(
 
 export const severitySchema = z.enum(["P1", "P2", "P3", "P4"]);
 export const incidentStatusSchema = z.enum(["open", "resolved", "in_progress", "escalated", "failed"]);
-export const actorSchema = z.enum(["operaiq", "human"]);
+export const actorSchema = z.enum(["sentinel", "operaiq", "human"]);
 export const remediationActionSchema = z.enum([
   "scale_service",
   "restart_pod",
@@ -25,7 +25,7 @@ export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", 
 
 export const envSchema = z.object({
   MONGODB_ATLAS_URI: z.string().min(1),
-  MONGODB_DATABASE_NAME: z.string().min(1).default("operaiq"),
+  MONGODB_DATABASE_NAME: z.string().min(1).default("sentinel"),
   GOOGLE_CLOUD_PROJECT_ID: optionalNonEmptyString,
   GOOGLE_CLOUD_REGION: z.string().min(1).default("us-central1"),
   VERTEX_AI_LOCATION: z.string().min(1).default("us-central1"),
@@ -41,8 +41,8 @@ export const envSchema = z.object({
   OPENAI_COMPATIBLE_BASE_URL: optionalUrl,
   OPENAI_COMPATIBLE_MODEL: optionalNonEmptyString,
   AGENT_BUILDER_AGENT_ID: z.string().optional(),
-  PUBSUB_ALERT_TOPIC: z.string().min(1).default("operaiq-alerts"),
-  PUBSUB_EVENTS_TOPIC: z.string().min(1).default("operaiq-agent-events"),
+  PUBSUB_ALERT_TOPIC: z.string().min(1).default("sentinel-alerts"),
+  PUBSUB_EVENTS_TOPIC: z.string().min(1).default("sentinel-agent-events"),
   SLACK_BOT_TOKEN: z.string().optional(),
   SLACK_DEFAULT_INCIDENT_CHANNEL: z.string().optional(),
   SLACK_SIGNING_SECRET: z.string().optional(),
@@ -51,6 +51,7 @@ export const envSchema = z.object({
   AGENT_TOOL_SECRET: optionalNonEmptyString,
   OPERAIQ_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  API_PUBLIC_URL: optionalUrl,
   NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:3001")
 });
 
@@ -147,7 +148,7 @@ export const genericOperaIqAlertPayloadSchema = z
   .passthrough();
 
 export const normalizedAlertSchema = z.object({
-  source: z.enum(["pagerduty", "datadog", "prometheus", "operaiq"]),
+  source: z.enum(["pagerduty", "datadog", "prometheus", "operaiq", "sentinel"]),
   title: z.string().min(1),
   severity: severitySchema,
   affectedServices: z.array(z.string().min(1)).min(1),

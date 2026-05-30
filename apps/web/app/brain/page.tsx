@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { fetchBrainStats, fetchRuntimeReadiness, fetchServices, isUnauthorizedError, simulateIncident, type BrainStats, type RuntimeReadiness, type Service } from "@/lib/api";
+import Link from "next/link";
+import { fetchBrainStats, fetchRuntimeReadiness, isUnauthorizedError, type BrainStats, type RuntimeReadiness } from "@/lib/api";
 
 function timeAgo(value: string | null | undefined): string {
   if (!value) return "none";
@@ -32,19 +31,13 @@ function runtimeModeLabel(mode: RuntimeReadiness["mode"] | undefined): string {
   if (mode === "production-blocked") return "Production blocked";
   if (mode === "autonomous-ready") return "Autonomous ready";
   if (mode === "local-verification") return "Local verification";
-  if (mode === "demo") return "Demo timing";
+  if (mode === "demo") return "Test timing";
   return "Checking runtime";
 }
 
 export default function BrainPage() {
-  const router = useRouter();
   const [stats, setStats] = useState<BrainStats | null>(null);
   const [runtime, setRuntime] = useState<RuntimeReadiness | null>(null);
-  const [services, setServices] = useState<Service[]>([]);
-  const [service, setService] = useState("payment-service");
-  const [severity, setSeverity] = useState<"P1" | "P2" | "P3" | "P4">("P1");
-  const [symptoms, setSymptoms] = useState("ECONNRESET connection pool latency spike");
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,17 +50,11 @@ export default function BrainPage() {
       })
       .catch(() => undefined);
 
-    Promise.all([fetchBrainStats(), fetchServices()])
-      .then(([brainStats, serviceResponse]) => {
+    fetchBrainStats()
+      .then((brainStats) => {
         if (cancelled) return;
         setStats(brainStats);
-        setServices(serviceResponse.items);
         setError(null);
-        setService((current) => {
-          if (serviceResponse.items.some((item) => item.name === current)) return current;
-          if (serviceResponse.items.some((item) => item.name === "payment-service")) return "payment-service";
-          return serviceResponse.items[0]?.name ?? current;
-        });
       })
       .catch((loadError: unknown) => {
         if (cancelled || isUnauthorizedError(loadError)) return;
@@ -83,27 +70,6 @@ export default function BrainPage() {
     };
   }, []);
 
-  async function submit(): Promise<void> {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const result = await simulateIncident({
-        service,
-        severity,
-        symptoms: symptoms
-          .split(/[,\n]/)
-          .map((item) => item.trim())
-          .filter(Boolean)
-      });
-      router.push(`/incidents/${result.incidentId}`);
-    } catch (submitError: unknown) {
-      if (!isUnauthorizedError(submitError)) {
-        setError(submitError instanceof Error ? submitError.message : "Unable to simulate incident");
-      }
-      setSubmitting(false);
-    }
-  }
-
   const lastWrite = stats?.recentPostmortems[0]?.createdAt;
 
   return (
@@ -118,7 +84,7 @@ export default function BrainPage() {
             <div className="mt-1 text-[13px] text-foreground">{runtimeModeLabel(runtime?.mode)}</div>
           </div>
           <div className="font-mono text-[11px] uppercase tracking-[0.06em] text-muted">
-            {runtime?.production ? "Production" : "Non-production"} · {runtime?.localVerification ? "Fake action enabled" : "Real action path"} · {runtime?.demoTiming ? "Demo timing" : "Live timing"}
+            {runtime?.production ? "Production" : "Non-production"} · {runtime?.localVerification ? "Local action recording" : "Real action path"} · {runtime?.demoTiming ? "Test timing" : "Live timing"}
           </div>
         </div>
         {runtime?.violations?.length ? (
@@ -142,56 +108,6 @@ export default function BrainPage() {
               <span key={index} className={`h-full flex-1 border-r border-background last:border-r-0 ${index < 16 ? "bg-accent" : "bg-elevated"}`} />
             ))}
           </div>
-        </div>
-      </section>
-
-      <section className="border border-border bg-panel">
-        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Simulate incident</div>
-        <div className="grid gap-3 p-3 lg:grid-cols-[180px_140px_minmax(220px,1fr)_170px]">
-          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
-            Service
-            <select
-              value={service}
-              onChange={(event) => setService(event.target.value)}
-              className="mt-1 h-9 w-full border border-border bg-background px-2 text-[13px] normal-case tracking-normal text-foreground outline-none focus:border-active"
-            >
-              {services.map((item) => (
-                <option key={item.id} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
-            Severity
-            <select
-              value={severity}
-              onChange={(event) => setSeverity(event.target.value as "P1" | "P2" | "P3" | "P4")}
-              className="mt-1 h-9 w-full border border-border bg-background px-2 text-[13px] normal-case tracking-normal text-foreground outline-none focus:border-active"
-            >
-              <option value="P1">P1</option>
-              <option value="P2">P2</option>
-              <option value="P3">P3</option>
-              <option value="P4">P4</option>
-            </select>
-          </label>
-          <label className="text-[12px] uppercase tracking-[0.06em] text-muted">
-            Symptoms
-            <input
-              value={symptoms}
-              onChange={(event) => setSymptoms(event.target.value)}
-              className="mt-1 h-9 w-full border border-border bg-background px-2 font-mono text-[12px] normal-case tracking-normal text-foreground outline-none focus:border-active"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting || services.length === 0}
-            className="mt-5 inline-flex h-9 items-center justify-center gap-2 border border-active bg-elevated px-3 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground hover:bg-background disabled:cursor-wait disabled:text-muted"
-          >
-            {submitting ? <span className="h-3 w-3 animate-spin rounded-full border border-muted border-t-active" aria-hidden="true" /> : null}
-            {submitting ? "Triggering..." : "Run Simulation →"}
-          </button>
         </div>
       </section>
 

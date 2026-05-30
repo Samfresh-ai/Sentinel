@@ -15,7 +15,7 @@ const optionalUrl = z.preprocess(
 
 const agentEnvSchema = z.object({
   MONGODB_ATLAS_URI: z.string().min(1),
-  MONGODB_DATABASE_NAME: z.string().min(1).default("operaiq"),
+  MONGODB_DATABASE_NAME: z.string().min(1).default("sentinel"),
   GOOGLE_CLOUD_PROJECT_ID: optionalNonEmptyString,
   GOOGLE_CLOUD_REGION: z.string().min(1).default("us-central1"),
   VERTEX_AI_LOCATION: z.string().min(1).default("us-central1"),
@@ -36,9 +36,9 @@ const agentEnvSchema = z.object({
   WEBHOOK_SECRET: optionalNonEmptyString,
   AGENT_TOOL_SECRET: optionalNonEmptyString,
   OPERAIQ_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
-  CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("operaiq-remediate"),
+  CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("sentinel-remediate"),
   MONGODB_MCP_SERVER_COMMAND: z.string().optional(),
-  AGENT_NAME: z.string().min(1).default("OperaIQ")
+  AGENT_NAME: z.string().min(1).default("Sentinel")
 });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;

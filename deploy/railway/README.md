@@ -1,12 +1,12 @@
 # Sentinel Railway Deployment
 
-This is the Sentinel-only deployment path. Do not deploy this as OperaIQ.
+This is the Sentinel-only deployment path.
 
 ## Target Shape
 
 - `sentinel-api`: Docker build from `apps/api/Dockerfile`, public HTTPS domain, health check `/health`.
 - `sentinel-web`: Docker build from `apps/web/Dockerfile`, public HTTPS domain, points at `sentinel-api`.
-- Splunk: use Splunk Cloud or a separately managed Splunk Enterprise target for production. A Railway Splunk container is acceptable for a public demo only if it has persistent volumes for both `/opt/splunk/etc` and `/opt/splunk/var`, a real admin password, HEC enabled, and backups.
+- Splunk: use Splunk Cloud or a separately managed Splunk Enterprise target for production. A Railway Splunk container is acceptable for public proof only if it has persistent volumes for both `/opt/splunk/etc` and `/opt/splunk/var`, a real admin password, HEC enabled, and backups.
 
 Railway is a fit for the web/API because it supports persistent services, monorepo services, custom Dockerfile paths, variables, generated public domains, and volumes:
 
@@ -47,6 +47,7 @@ JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>
 PUBLIC_APP_URL=https://<sentinel-web-domain>
+API_PUBLIC_URL=https://<sentinel-api-domain>
 NEXT_PUBLIC_API_URL=https://<sentinel-api-domain>
 AGENT_TOOL_EXECUTION_BASE_URL=https://<sentinel-api-domain>
 SPLUNK_HOST=<splunk-host>
@@ -130,5 +131,5 @@ Use the Sentinel setup screen to create the org and get the webhook URL, then co
 
 - Vercel-only is not acceptable for full Sentinel because it does not host the stateful Splunk watcher.
 - Railway web/API without real Splunk is not acceptable.
-- A Splunk container without persistent `/opt/splunk/etc` and `/opt/splunk/var` is demo-only, not production.
+- A Splunk container without persistent `/opt/splunk/etc` and `/opt/splunk/var` is proof-only, not production.
 - `OPERAIQ_LOCAL_VERIFY=true` is proof mode only; production startup blocks it.
