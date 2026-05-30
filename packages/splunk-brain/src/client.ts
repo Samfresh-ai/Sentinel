@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
 import { Buffer } from "node:buffer";
 import { createLogger } from "@operaiq/shared";
 import { z } from "zod";
@@ -18,6 +19,7 @@ export const SplunkConfigSchema = z.object({
   SPLUNK_MGMT_PORT: z.number().default(8089),
   SPLUNK_HEC_PORT: z.number().default(8088),
   SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
+  SPLUNK_CA_CERT: z.string().optional(),
   SPLUNK_USERNAME: z.string(),
   SPLUNK_PASSWORD: z.string(),
   SPLUNK_HEC_TOKEN: z.string(),
@@ -63,14 +65,14 @@ function cloudStackHost(config: SplunkConfig): string | undefined {
   return host.includes(".") ? host : `${host}.splunkcloud.com`;
 }
 
-function cloudHecHost(stackHost: string): string {
-  if (stackHost.startsWith("http-inputs-") || stackHost.startsWith("http-inputs.")) return stackHost;
-  if (stackHost.endsWith(".splunkcloud.com")) return `http-inputs-${stackHost}`;
-  return `http-inputs-${stackHost}`;
-}
-
 function shouldAllowSelfSigned(endpoint: { host: string }): boolean {
   return isLocalHost(endpoint.host);
+}
+
+function customCertificateAuthorities(config: SplunkConfig): string[] | undefined {
+  const pem = config.SPLUNK_CA_CERT?.trim().replace(/\\n/g, "\n");
+  if (!pem) return undefined;
+  return [...tls.rootCertificates, pem];
 }
 
 function managementEndpoint(config: SplunkConfig): {
@@ -85,8 +87,7 @@ function managementEndpoint(config: SplunkConfig): {
     return {
       protocol: "https:",
       host: stackHost,
-      port: config.SPLUNK_MGMT_PORT,
-      basePath: ""
+      basePath: "/en-US/splunkd"
     };
   }
   return {
@@ -108,7 +109,7 @@ function hecEndpoint(config: SplunkConfig): {
   if (stackHost) {
     return {
       protocol: "https:",
-      host: cloudHecHost(stackHost),
+      host: stackHost,
       port: config.SPLUNK_HEC_PORT,
       basePath: ""
     };
@@ -182,6 +183,8 @@ async function requestRaw(input: {
   headers?: Record<string, string>;
   body?: string;
   rejectUnauthorized?: boolean;
+  ca?: string[];
+  allowCertificateHostnameMismatch?: boolean;
 }): Promise<string> {
   const transport = input.protocol === "https:" ? https : http;
   const body = input.body;
@@ -198,7 +201,9 @@ async function requestRaw(input: {
         method: input.method,
         path: input.path,
         headers,
-        rejectUnauthorized: input.protocol === "https:" ? input.rejectUnauthorized : undefined
+        rejectUnauthorized: input.protocol === "https:" ? input.rejectUnauthorized : undefined,
+        ...(input.protocol === "https:" && input.ca ? { ca: input.ca } : {}),
+        ...(input.protocol === "https:" && input.allowCertificateHostnameMismatch ? { checkServerIdentity: () => undefined } : {})
       },
       async (response) => {
         const text = await readResponseBody(response);
@@ -234,6 +239,7 @@ export async function splunkRestRequest<T>(
   const config = getSplunkConfig();
   const endpoint = managementEndpoint(config);
   const allowSelfSigned = shouldAllowSelfSigned(endpoint);
+  const ca = customCertificateAuthorities(config);
   if (allowSelfSigned && !warnedSelfSigned) {
     logger.warn({ host: endpoint.host }, "Splunk local self-signed certificate validation is disabled for localhost only");
     warnedSelfSigned = true;
@@ -244,6 +250,8 @@ export async function splunkRestRequest<T>(
     method: input.method ?? "GET",
     path: `${endpoint.basePath}${pathWithParams(input.path, input.query)}`,
     rejectUnauthorized: !allowSelfSigned,
+    ...(ca ? { ca } : {}),
+    ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
       ...accessHeaders(config),
       // SCS tokens are Splunk Cloud Platform only. Local Enterprise uses Basic Auth.
@@ -262,12 +270,16 @@ export async function splunkRestRequest<T>(
 export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown): Promise<T> {
   const config = getSplunkConfig();
   const endpoint = hecEndpoint(config);
+  const allowSelfSigned = shouldAllowSelfSigned(endpoint);
+  const ca = customCertificateAuthorities(config);
   const text = await requestRaw({
     ...requestEndpoint(endpoint),
     method: "POST",
     path: `${endpoint.basePath}/services/collector/event`,
     body: JSON.stringify(payload),
-    rejectUnauthorized: !shouldAllowSelfSigned(endpoint),
+    rejectUnauthorized: !allowSelfSigned,
+    ...(ca ? { ca } : {}),
+    ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
       ...accessHeaders(config),
       Authorization: `Splunk ${config.SPLUNK_HEC_TOKEN}`,
