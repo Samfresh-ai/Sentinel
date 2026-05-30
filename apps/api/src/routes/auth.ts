@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import jwt from "jsonwebtoken";
-import { countDocuments, createCollection, createKvKey, getDocument, insertDocument, queryDocuments, updateDocument } from "@operaiq/splunk-brain";
+import { countDocuments, createCollection, createKvKey, getDocument, insertDocument, queryDocuments, updateDocument } from "@sentinel/splunk-brain";
 
 export interface AuthenticatedOrg {
   orgId: string;
@@ -101,44 +101,6 @@ async function ensureAuthCollections(): Promise<void> {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
-}
-
-export async function ensureDemoOrg(): Promise<{ orgId: string; orgName: string; adminEmail: string; webhookSecret: string; token: string }> {
-  await ensureAuthCollections();
-  const orgId = process.env.DEMO_ORG_ID ?? "demo-org";
-  const adminEmail = normalizeEmail(process.env.DEMO_ADMIN_EMAIL ?? "demo@sentinel.local");
-  const orgName = process.env.DEMO_ORG_NAME ?? "Sentinel Demo";
-  const webhookSecret = process.env.DEMO_WEBHOOK_SECRET ?? "sentinel-demo-webhook-secret";
-  const password = process.env.DEMO_ADMIN_PASSWORD ?? "sentinel-demo-password";
-  const now = new Date().toISOString();
-  const existingOrg = await getDocument<Record<string, unknown>>("orgs", orgId);
-  const webhookSecretHash = await bcrypt.hash(webhookSecret, BCRYPT_COST);
-  if (!existingOrg) {
-    await insertDocument("orgs", {
-      _key: orgId,
-      orgName,
-      adminEmail,
-      webhookSecretHash,
-      createdAt: now,
-      updatedAt: now
-    });
-  }
-  const existingUsers = await queryDocuments<Record<string, unknown>>("users", { email: adminEmail }, 1);
-  let userId = typeof existingUsers[0]?._key === "string" ? existingUsers[0]._key : "";
-  if (!userId) {
-    userId = createKvKey();
-    await insertDocument("users", {
-      _key: userId,
-      orgId,
-      orgName,
-      email: adminEmail,
-      passwordHash: await bcrypt.hash(password, BCRYPT_COST),
-      role: "admin",
-      createdAt: now,
-      updatedAt: now
-    });
-  }
-  return { orgId, orgName, adminEmail, webhookSecret, token: signToken({ orgId, userId, orgName }) };
 }
 
 export async function verifyWebhookOrg(orgId: string, secret: string): Promise<{ orgId: string; orgName: string }> {

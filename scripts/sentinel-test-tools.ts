@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { insertSentinelIncident } from "@operaiq/splunk-brain";
+import { insertSentinelIncident } from "@sentinel/splunk-brain";
 import {
   executeRemediation,
   querySplunkLogs,
@@ -7,8 +7,8 @@ import {
   sentinelGetServiceDependencyGraph,
   sentinelSearchSimilarIncidents,
   sentinelWritePostmortem
-} from "@operaiq/agent";
-import { ensureDemoOrg } from "./demo/org.js";
+} from "@sentinel/agent";
+import { ensureSeedOrg } from "./test-org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -17,11 +17,11 @@ function writeLine(line: string): void {
 async function main(): Promise<void> {
   process.env.SENTINEL_MODE = "true";
   process.env.AGENT_NAME = "Sentinel";
-  process.env.OPERAIQ_LOCAL_VERIFY = process.env.OPERAIQ_LOCAL_VERIFY ?? "true";
-  process.env.OPERAIQ_REMEDIATION_WAIT_MS = process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "0";
-  process.env.OPERAIQ_AI_PROVIDER = process.env.OPERAIQ_AI_PROVIDER ?? "offline";
+  process.env.SENTINEL_LOCAL_VERIFY = process.env.SENTINEL_LOCAL_VERIFY ?? "true";
+  process.env.SENTINEL_REMEDIATION_WAIT_MS = process.env.SENTINEL_REMEDIATION_WAIT_MS ?? "0";
+  process.env.SENTINEL_AI_PROVIDER = process.env.SENTINEL_AI_PROVIDER ?? "offline";
 
-  const org = await ensureDemoOrg();
+  const org = await ensureSeedOrg();
   const detectedAt = new Date(Date.now() - 5 * 60_000);
   const incidentId = await insertSentinelIncident({
     orgId: org.orgId,
@@ -84,12 +84,12 @@ async function main(): Promise<void> {
       {
         timestamp: detectedAt.toISOString(),
         event: "Test incident opened for Sentinel tool verification",
-        actor: "operaiq"
+        actor: "sentinel"
       },
       {
         timestamp: new Date().toISOString(),
         event: "Sentinel notification remediation executed",
-        actor: "operaiq"
+        actor: "sentinel"
       }
     ],
     rootCause: "Notification service could not read S3 templates because bucket access was denied.",

@@ -4,7 +4,7 @@ import { runSearch } from "./search.js";
 import type { SimilarIncident } from "./types.js";
 
 function tokenize(values: string[]): string[] {
-  const stopwords = new Set(["sentinel", "demo", "service", "app", "prod", "alert"]);
+  const stopwords = new Set(["sentinel", "test-timing", "service", "app", "prod", "alert"]);
   return [
     ...new Set(
       values

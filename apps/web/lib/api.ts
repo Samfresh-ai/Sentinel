@@ -70,7 +70,7 @@ export interface Postmortem {
   incidentId: string;
   title: string;
   summary: string;
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
   rootCause: string;
   contributingFactors: string[];
   remediationTaken: string[];
@@ -102,10 +102,10 @@ export interface BrainStats {
 }
 
 export interface RuntimeReadiness {
-  mode: "local-verification" | "demo" | "autonomous-ready" | "production-blocked";
+  mode: "local-verification" | "test-timing" | "autonomous-ready" | "production-blocked";
   production: boolean;
   localVerification: boolean;
-  demoTiming: boolean;
+  testTiming: boolean;
   violations: string[];
 }
 

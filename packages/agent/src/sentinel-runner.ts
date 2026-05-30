@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { agentEventSchema, type AgentEvent, type AgentStepType, type NormalizedAlert, normalizedAlertSchema } from "@operaiq/shared";
-import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@operaiq/shared";
-import { type AuditPhase, createCollection, getDocument, insertDocument, sendEvent, updateDocument, updateSentinelIncident, writeAuditEntry } from "@operaiq/splunk-brain";
+import { agentEventSchema, type AgentEvent, type AgentStepType, type NormalizedAlert, normalizedAlertSchema } from "@sentinel/shared";
+import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@sentinel/shared";
+import { type AuditPhase, createCollection, getDocument, insertDocument, sendEvent, updateDocument, updateSentinelIncident, writeAuditEntry } from "@sentinel/splunk-brain";
 import { generateIncidentConclusion } from "./gemini.js";
 import { executeRemediation } from "./tools/execute-remediation.js";
 import { sentinelGetRunbook } from "./tools/sentinel-get-runbook.js";
@@ -29,12 +29,12 @@ function remediationWaitMs(overrideMs?: number): number {
   if (typeof overrideMs === "number" && Number.isFinite(overrideMs) && overrideMs >= 0) {
     return overrideMs;
   }
-  return Number.parseInt(process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "30000", 10);
+  return Number.parseInt(process.env.SENTINEL_REMEDIATION_WAIT_MS ?? "30000", 10);
 }
 
 function verifyWaitMs(overrideMs?: number): number {
   if (typeof overrideMs === "number" && Number.isFinite(overrideMs) && overrideMs >= 0) return overrideMs;
-  if ((process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "").trim() === "0") return 0;
+  if ((process.env.SENTINEL_REMEDIATION_WAIT_MS ?? "").trim() === "0") return 0;
   const parsed = Number.parseInt(process.env.SENTINEL_VERIFY_WAIT_MS ?? "15000", 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 15000;
 }
@@ -146,7 +146,7 @@ function actionFromCommand(command: string | null): "scale_service" | "restart_p
 
 function splunkSearchForAlert(alert: NormalizedAlert): string {
   const symptomText = alert.symptoms.join(" ").toLowerCase();
-  if (alert.incidentType === "sentinel_demo_payment_redis_spike" || symptomText.includes("econnreset")) {
+  if (alert.incidentType === "sentinel_test_payment_redis_spike" || symptomText.includes("econnreset")) {
     return "index=prod sourcetype=app service=payment | stats count by error_type";
   }
 
@@ -303,7 +303,7 @@ async function writeEscalationPostmortem(input: {
   title: string;
   severity: string;
   symptoms: string[];
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
   rootCauseSuspected: string | null;
   remediationsTried: string[];
   verifyResults: Array<{ timestamp: string; errorCount: number; passed: boolean }>;
@@ -401,7 +401,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
   const verifyFailsBeforePass = typeof rawInput.verifyFailsBeforePass === "number" ? rawInput.verifyFailsBeforePass : undefined;
   const forceCrashPhase = typeof rawInput.forceCrashPhase === "string" ? rawInput.forceCrashPhase : undefined;
   const toolsCalled: string[] = [];
-  const timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }> = [];
+  const timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }> = [];
   const addTimeline = (event: string): void => {
     timeline.push({ timestamp: new Date().toISOString(), event, actor: "sentinel" });
   };

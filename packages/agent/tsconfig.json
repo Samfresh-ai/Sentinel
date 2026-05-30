@@ -7,5 +7,5 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../shared" }, { "path": "../brain" }, { "path": "../splunk-brain" }, { "path": "../splunk-mcp" }]
+  "references": [{ "path": "../shared" }, { "path": "../splunk-brain" }, { "path": "../splunk-mcp" }]
 }

@@ -2,10 +2,10 @@ import { ServicesClient } from "@google-cloud/run";
 import { WebClient } from "@slack/web-api";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { createLogger, loadRootEnv, remediationActionSchema } from "@operaiq/shared";
+import { createLogger, loadRootEnv, remediationActionSchema } from "@sentinel/shared";
 
 loadRootEnv();
-const logger = createLogger("operaiq-remediation-job");
+const logger = createLogger("sentinel-remediation-job");
 
 const parametersSchema = z.record(z.union([z.string(), z.number()]));
 
@@ -78,8 +78,8 @@ async function updateCloudRunService(
   const template = service.template ?? {};
   const annotations = {
     ...(template.annotations ?? {}),
-    "operaiq.lastAction": action,
-    "operaiq.lastActionAt": new Date().toISOString()
+    "sentinel.lastAction": action,
+    "sentinel.lastActionAt": new Date().toISOString()
   };
   const minInstanceCount =
     action === "scale_service"
@@ -111,15 +111,15 @@ async function notifyTeam(config: ServiceExecutionConfig, parameters: Remediatio
   const client = new WebClient(token);
   const severity = parameterString(parameters, "severity") ?? "P2";
   const symptoms = parameterString(parameters, "symptoms") ?? "not provided";
-  const reasoning = parameterString(parameters, "reasoning") ?? "OperaIQ selected a low-risk team notification.";
+  const reasoning = parameterString(parameters, "reasoning") ?? "Sentinel selected a low-risk team notification.";
   const incidentId = parameterString(parameters, "incidentId") ?? "";
   const publicAppUrl = process.env.PUBLIC_APP_URL ?? "http://localhost:3000";
   const ownerMentions = config.owners.map((owner) => `<@${owner}>`).join(" ");
   const text = [
-    `*OperaIQ Incident* - ${config.name} ${severity}`,
+    `*Sentinel Incident* - ${config.name} ${severity}`,
     `*Status:* In progress`,
     `*Symptoms:* ${symptoms}`,
-    `*OperaIQ reasoning:* ${reasoning}`,
+    `*Sentinel reasoning:* ${reasoning}`,
     `*Next action:* Team notification executed by Cloud Run remediation job`,
     incidentId ? `*Track live:* ${publicAppUrl}/incidents/${incidentId}` : `*Track live:* ${publicAppUrl}`,
     ownerMentions.length > 0 ? `*Owners:* ${ownerMentions}` : ""

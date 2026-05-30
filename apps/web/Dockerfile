@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY apps/web apps/web
-RUN pnpm --filter @operaiq/web build
+RUN pnpm --filter @sentinel/web build
 
 FROM node:22-slim AS runner
 ENV NODE_ENV=production

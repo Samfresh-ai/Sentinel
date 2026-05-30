@@ -10,12 +10,10 @@ export function createLogger(name: string) {
         "SPLUNK_HEC_TOKEN",
         "SLACK_BOT_TOKEN",
         "SLACK_SIGNING_SECRET",
-        "MONGODB_ATLAS_URI",
         "*.SPLUNK_PASSWORD",
         "*.SPLUNK_HEC_TOKEN",
         "*.SLACK_BOT_TOKEN",
-        "*.SLACK_SIGNING_SECRET",
-        "*.MONGODB_ATLAS_URI"
+        "*.SLACK_SIGNING_SECRET"
       ],
       censor: "[redacted]"
     },

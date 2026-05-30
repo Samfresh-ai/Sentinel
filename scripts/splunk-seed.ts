@@ -4,9 +4,9 @@ import {
   clearCollection,
   createCollection,
   sendEvent
-} from "@operaiq/splunk-brain";
-import { incidents, patterns, runbooks } from "./seed.js";
-import { ensureDemoOrg } from "./demo/org.js";
+} from "@sentinel/splunk-brain";
+import { incidents, patterns, runbooks } from "./seed-data.js";
+import { ensureSeedOrg } from "./test-org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -119,11 +119,11 @@ const services = [
 ];
 
 const runtimeConfigs = [
-  serviceRuntimeConfig("payment-service", "OPERAIQ_PAYMENT_SERVICE_ADMIN_BASE_URL", "OPERAIQ_PAYMENT_SERVICE_CLOUD_RUN_SERVICE_NAME"),
-  serviceRuntimeConfig("auth-service", "OPERAIQ_AUTH_SERVICE_ADMIN_BASE_URL", "OPERAIQ_AUTH_SERVICE_CLOUD_RUN_SERVICE_NAME"),
-  serviceRuntimeConfig("notification-service", "OPERAIQ_NOTIFICATION_SERVICE_ADMIN_BASE_URL", "OPERAIQ_NOTIFICATION_SERVICE_CLOUD_RUN_SERVICE_NAME"),
-  serviceRuntimeConfig("redis-cache", "OPERAIQ_REDIS_CACHE_ADMIN_BASE_URL", "OPERAIQ_REDIS_CACHE_CLOUD_RUN_SERVICE_NAME"),
-  serviceRuntimeConfig("postgres-main", "OPERAIQ_POSTGRES_MAIN_ADMIN_BASE_URL", "OPERAIQ_POSTGRES_MAIN_CLOUD_RUN_SERVICE_NAME")
+  serviceRuntimeConfig("payment-service", "SENTINEL_PAYMENT_SERVICE_ADMIN_BASE_URL", "SENTINEL_PAYMENT_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("auth-service", "SENTINEL_AUTH_SERVICE_ADMIN_BASE_URL", "SENTINEL_AUTH_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("notification-service", "SENTINEL_NOTIFICATION_SERVICE_ADMIN_BASE_URL", "SENTINEL_NOTIFICATION_SERVICE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("redis-cache", "SENTINEL_REDIS_CACHE_ADMIN_BASE_URL", "SENTINEL_REDIS_CACHE_CLOUD_RUN_SERVICE_NAME"),
+  serviceRuntimeConfig("postgres-main", "SENTINEL_POSTGRES_MAIN_ADMIN_BASE_URL", "SENTINEL_POSTGRES_MAIN_CLOUD_RUN_SERVICE_NAME")
 ];
 
 function toIso(value: Date | null): string | null {
@@ -138,7 +138,7 @@ async function recreateCollections(orgId: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const org = await ensureDemoOrg();
+  const org = await ensureSeedOrg();
   await recreateCollections(org.orgId);
   const runbookKey = (incidentType: string) => scopedKey(org.orgId, incidentType);
 

@@ -1,4 +1,4 @@
-import { loadRootEnv } from "@operaiq/shared";
+import { loadRootEnv } from "@sentinel/shared";
 import { z } from "zod";
 
 loadRootEnv();

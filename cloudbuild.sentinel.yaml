@@ -49,7 +49,7 @@ steps:
       - managed
       - --allow-unauthenticated
       - --update-env-vars
-      - OPERAIQ_RUNTIME_ENV=production,SENTINEL_MODE=true,AGENT_NAME=Sentinel,CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate
+      - SENTINEL_RUNTIME_ENV=production,SENTINEL_MODE=true,AGENT_NAME=Sentinel,CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -64,7 +64,7 @@ steps:
       - managed
       - --allow-unauthenticated
       - --update-env-vars
-      - OPERAIQ_RUNTIME_ENV=production
+      - SENTINEL_RUNTIME_ENV=production
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
@@ -75,7 +75,7 @@ steps:
           gcloud run jobs deploy "sentinel-remediate-$${action}" \
             --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/remediation:$SHORT_SHA" \
             --region "${_REGION}" \
-            --update-env-vars "GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID,GOOGLE_CLOUD_REGION=${_REGION},OPERAIQ_RUNTIME_ENV=production,SENTINEL_MODE=true,AGENT_NAME=Sentinel,CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate" \
+            --update-env-vars "GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID,GOOGLE_CLOUD_REGION=${_REGION},SENTINEL_RUNTIME_ENV=production,SENTINEL_MODE=true,AGENT_NAME=Sentinel,CLOUD_RUN_REMEDIATION_JOB_PREFIX=sentinel-remediate" \
             --max-retries 0
         done
 substitutions:

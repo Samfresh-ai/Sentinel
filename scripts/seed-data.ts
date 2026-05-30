@@ -1,38 +1,10 @@
-import "dotenv/config";
-import { pathToFileURL } from "node:url";
-import { ObjectId } from "mongodb";
-import {
-  closeMongoClient,
-  createCollectionsAndIndexes,
-  incidentsCollection,
-  insertIncidentWithEmbedding,
-  insertPatternWithEmbedding,
-  insertRunbookWithEmbedding,
-  patternsCollection,
-  runbooksCollection,
-  searchIncidentVectors,
-  serviceRuntimeConfigsCollection,
-  servicesCollection,
-  upsertService,
-  upsertServiceRuntimeConfig,
-  type NewIncidentDocument,
-  type NewPatternDocument,
-  type NewRunbookDocument,
-  type NewServiceRuntimeConfigDocument,
-  type ServiceDocument
-} from "@operaiq/brain";
-
-function writeLine(line: string): void {
-  process.stdout.write(`${line}\n`);
-}
-
 const now = new Date("2026-05-20T08:00:00.000Z");
 
 function minutesAgo(minutes: number): Date {
   return new Date(now.getTime() - minutes * 60_000);
 }
 
-export const runbooks: NewRunbookDocument[] = [
+export const runbooks = [
   {
     title: "Redis connection exhaustion recovery",
     incidentType: "redis-connection-exhaustion",
@@ -267,7 +239,7 @@ export const runbooks: NewRunbookDocument[] = [
   }
 ];
 
-export const incidents: NewIncidentDocument[] = [
+export const incidents = [
   {
     title: "INC-2026-0101 Redis connection pool exhausted during checkout",
     severity: "P1",
@@ -550,7 +522,7 @@ export const incidents: NewIncidentDocument[] = [
   }
 ];
 
-export const patterns: NewPatternDocument[] = [
+export const patterns = [
   {
     name: "redis-connection-pool-exhaustion",
     symptomSignals: ["Redis connection timeouts", "maxclients reached", "connection pool exhausted"],
@@ -583,223 +555,3 @@ export const patterns: NewPatternDocument[] = [
   }
 ];
 
-function runbookIdsFor(types: string[], ids: Map<string, ObjectId>): ObjectId[] {
-  return types.map((type) => {
-    const id = ids.get(type);
-    if (!id) {
-      throw new Error(`Missing runbook ID for ${type}`);
-    }
-    return id;
-  });
-}
-
-function configuredIncidentChannel(): string | null {
-  const channel = process.env.SLACK_DEFAULT_INCIDENT_CHANNEL;
-  return channel && channel.trim().length > 0 ? channel : null;
-}
-
-function optionalEnv(name: string): string | null {
-  const value = process.env[name];
-  return value && value.trim().length > 0 ? value : null;
-}
-
-function serviceRuntimeConfig(
-  adminBaseUrlEnv: string,
-  cloudRunServiceNameEnv: string
-): Omit<NewServiceRuntimeConfigDocument, "serviceName"> {
-  return {
-    incidentChannel: configuredIncidentChannel(),
-    adminBaseUrl: optionalEnv(adminBaseUrlEnv),
-    cloudRunServiceName: optionalEnv(cloudRunServiceNameEnv)
-  };
-}
-
-async function seedService(
-  service: Omit<ServiceDocument, "_id" | "createdAt" | "updatedAt">,
-  runtimeConfig: Omit<NewServiceRuntimeConfigDocument, "serviceName">
-): Promise<void> {
-  await upsertService(service);
-  await upsertServiceRuntimeConfig({
-    serviceName: service.name,
-    ...runtimeConfig
-  });
-}
-
-async function resetSeedDocuments(): Promise<void> {
-  await (await incidentsCollection()).deleteMany({ title: { $in: incidents.map((incident) => incident.title) } });
-  await (await servicesCollection()).deleteMany({
-    name: { $in: ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"] }
-  });
-  await (await serviceRuntimeConfigsCollection()).deleteMany({
-    serviceName: { $in: ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"] }
-  });
-  await (await runbooksCollection()).deleteMany({ incidentType: { $in: runbooks.map((runbook) => runbook.incidentType) } });
-  await (await patternsCollection()).deleteMany({ name: { $in: patterns.map((pattern) => pattern.name) } });
-}
-
-async function seed(): Promise<void> {
-  await createCollectionsAndIndexes();
-  await resetSeedDocuments();
-
-  const runbookIds = new Map<string, ObjectId>();
-  for (const runbook of runbooks) {
-    const id = await insertRunbookWithEmbedding(runbook);
-    runbookIds.set(runbook.incidentType, id);
-  }
-
-  await seedService(
-    {
-      name: "payment-service",
-      team: "payments-squad",
-      language: "Node.js",
-      dependencies: ["redis-cache", "postgres-main", "stripe-api", "auth-service"],
-      dependents: [],
-      knownFragilePoints: ["Redis connection pool", "Stripe rate limits", "tax calculation CPU hot path"],
-      slaMs: 300,
-      owners: ["U01PAYMENTS", "U02SRE"],
-      runbookIds: runbookIdsFor(
-        [
-          "redis-connection-exhaustion",
-          "postgres-connection-pool-failure",
-          "stripe-api-rate-limiting",
-          "payment-service-cpu-spike",
-          "disk-full-upstream-timeout"
-        ],
-        runbookIds
-      )
-    },
-    serviceRuntimeConfig("OPERAIQ_PAYMENT_SERVICE_ADMIN_BASE_URL", "OPERAIQ_PAYMENT_SERVICE_CLOUD_RUN_SERVICE_NAME")
-  );
-
-  await seedService(
-    {
-      name: "auth-service",
-      team: "identity-squad",
-      language: "Node.js",
-      dependencies: ["redis-cache", "postgres-main"],
-      dependents: ["payment-service"],
-      knownFragilePoints: ["JWT key refresh", "Token introspection cache", "PostgreSQL auth pool"],
-      slaMs: 180,
-      owners: ["U03IDENTITY", "U02SRE"],
-      runbookIds: runbookIdsFor(
-        ["redis-connection-exhaustion", "postgres-connection-pool-failure", "node-memory-leak-oomkill", "dns-resolution-failure"],
-        runbookIds
-      )
-    },
-    serviceRuntimeConfig("OPERAIQ_AUTH_SERVICE_ADMIN_BASE_URL", "OPERAIQ_AUTH_SERVICE_CLOUD_RUN_SERVICE_NAME")
-  );
-
-  await seedService(
-    {
-      name: "notification-service",
-      team: "messaging-squad",
-      language: "Node.js",
-      dependencies: ["postgres-main"],
-      dependents: [],
-      knownFragilePoints: ["S3 template permissions", "Queue lag", "Template renderer memory"],
-      slaMs: 1_000,
-      owners: ["U04MESSAGING", "U02SRE"],
-      runbookIds: runbookIdsFor(["node-memory-leak-oomkill", "s3-bucket-permission-error", "disk-full-upstream-timeout"], runbookIds)
-    },
-    serviceRuntimeConfig("OPERAIQ_NOTIFICATION_SERVICE_ADMIN_BASE_URL", "OPERAIQ_NOTIFICATION_SERVICE_CLOUD_RUN_SERVICE_NAME")
-  );
-
-  await seedService(
-    {
-      name: "redis-cache",
-      team: "platform-squad",
-      language: "Redis",
-      dependencies: [],
-      dependents: ["payment-service", "auth-service"],
-      knownFragilePoints: ["maxclients", "eviction pressure", "connection storms"],
-      slaMs: 25,
-      owners: ["U05PLATFORM", "U02SRE"],
-      runbookIds: runbookIdsFor(["redis-connection-exhaustion"], runbookIds)
-    },
-    serviceRuntimeConfig("OPERAIQ_REDIS_CACHE_ADMIN_BASE_URL", "OPERAIQ_REDIS_CACHE_CLOUD_RUN_SERVICE_NAME")
-  );
-
-  await seedService(
-    {
-      name: "postgres-main",
-      team: "data-platform",
-      language: "PostgreSQL",
-      dependencies: [],
-      dependents: ["payment-service", "auth-service", "notification-service"],
-      knownFragilePoints: ["max connections", "long-running settlement queries", "migration worker contention"],
-      slaMs: 80,
-      owners: ["U06DATA", "U02SRE"],
-      runbookIds: runbookIdsFor(["postgres-connection-pool-failure"], runbookIds)
-    },
-    serviceRuntimeConfig("OPERAIQ_POSTGRES_MAIN_ADMIN_BASE_URL", "OPERAIQ_POSTGRES_MAIN_CLOUD_RUN_SERVICE_NAME")
-  );
-
-  for (const incident of incidents) {
-    await insertIncidentWithEmbedding(incident);
-  }
-
-  for (const pattern of patterns) {
-    await insertPatternWithEmbedding(pattern);
-  }
-
-  const embeddingProvider = process.env.OPERAIQ_AI_PROVIDER === "offline" ? "offline deterministic" : "Vertex AI";
-  writeLine(
-    `PASSED seed - inserted 20 incidents, 5 services, 5 service runtime configs, 8 runbooks, and 5 patterns with ${embeddingProvider} embeddings`
-  );
-}
-
-async function verifySeed(): Promise<void> {
-  const incidentCount = await (await incidentsCollection()).countDocuments({ title: { $in: incidents.map((incident) => incident.title) } });
-  const serviceCount = await (await servicesCollection()).countDocuments({
-    name: { $in: ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"] }
-  });
-  const serviceRuntimeConfigCount = await (await serviceRuntimeConfigsCollection()).countDocuments({
-    serviceName: { $in: ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"] }
-  });
-  const runbookCount = await (await runbooksCollection()).countDocuments({
-    incidentType: { $in: runbooks.map((runbook) => runbook.incidentType) }
-  });
-  const patternCount = await (await patternsCollection()).countDocuments({ name: { $in: patterns.map((pattern) => pattern.name) } });
-  const vectorResults = await searchIncidentVectors("database connection timeout", 5);
-  const databaseMatches = vectorResults.filter((result) =>
-    [result.title, result.rootCause ?? "", result.resolution ?? "", result.remediationSteps.join(" ")]
-      .join(" ")
-      .toLowerCase()
-      .includes("postgres")
-  );
-
-  const failures: string[] = [];
-  if (incidentCount !== 20) failures.push(`expected 20 seeded incidents, found ${incidentCount}`);
-  if (serviceCount !== 5) failures.push(`expected 5 seeded services, found ${serviceCount}`);
-  if (serviceRuntimeConfigCount !== 5) failures.push(`expected 5 seeded service runtime configs, found ${serviceRuntimeConfigCount}`);
-  if (runbookCount !== 8) failures.push(`expected 8 seeded runbooks, found ${runbookCount}`);
-  if (patternCount !== 5) failures.push(`expected 5 seeded patterns, found ${patternCount}`);
-  if (vectorResults.length < 3 || databaseMatches.length < 3) {
-    failures.push(`expected at least 3 database vector matches, found ${databaseMatches.length}`);
-  }
-
-  if (failures.length > 0) {
-    throw new Error(failures.join("; "));
-  }
-  writeLine("PASSED seed:verify - seed counts are correct and database connection timeout returns 3+ vector matches");
-}
-
-async function main(): Promise<void> {
-  if (process.argv.includes("--verify")) {
-    await verifySeed();
-    return;
-  }
-  await seed();
-}
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  main()
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      writeLine(`FAILED seed - ${message}`);
-      process.exitCode = 1;
-    })
-    .finally(async () => {
-      await closeMongoClient();
-    });
-}

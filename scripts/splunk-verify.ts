@@ -1,7 +1,7 @@
 import "dotenv/config";
-import { countDocuments, runSearch } from "@operaiq/splunk-brain";
-import { incidents, patterns, runbooks } from "./seed.js";
-import { ensureDemoOrg } from "./demo/org.js";
+import { countDocuments, runSearch } from "@sentinel/splunk-brain";
+import { incidents, patterns, runbooks } from "./seed-data.js";
+import { ensureSeedOrg } from "./test-org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -12,7 +12,7 @@ function scopedKey(orgId: string, key: string): string {
 }
 
 async function main(): Promise<void> {
-  const org = await ensureDemoOrg();
+  const org = await ensureSeedOrg();
   const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
   const expected = [
     {

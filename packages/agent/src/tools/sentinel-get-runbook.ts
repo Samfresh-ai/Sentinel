@@ -1,9 +1,28 @@
 import { z } from "zod";
-import { splunkKvPut, splunkKvQuery } from "@operaiq/splunk-mcp";
+import { splunkKvPut, splunkKvQuery } from "@sentinel/splunk-mcp";
 import { generateRunbook } from "../gemini.js";
 import { getRunbookSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
-import type { RunbookResult, RunbookStepResult } from "./get-runbook.js";
+
+export type RunbookStepResult = {
+  order: number;
+  action: string;
+  command: string | null;
+  isExecutable: boolean;
+  riskLevel: "low" | "medium" | "high";
+};
+
+export type RunbookResult = {
+  id: string;
+  title: string;
+  incidentType: string;
+  steps: RunbookStepResult[];
+  applicableServices: string[];
+  successCriteria: string;
+  fallbackAction: string | null;
+  similarity: number;
+  generated: boolean;
+};
 
 export const sentinelGetRunbookInputSchema = z.object({
   incidentDescription: z.string().min(1),

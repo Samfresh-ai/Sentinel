@@ -1,6 +1,6 @@
 import {
   datadogMonitorPayloadSchema,
-  genericOperaIqAlertPayloadSchema,
+  genericSentinelAlertPayloadSchema,
   normalizedAlertSchema,
   pagerDutyWebhookPayloadSchema,
   prometheusAlertSchema,
@@ -39,10 +39,10 @@ function serviceFromTags(tags: string[] | string | undefined): string | undefine
 }
 
 export function normalizeAlertPayload(payload: unknown): NormalizedAlert {
-  const generic = genericOperaIqAlertPayloadSchema.safeParse(payload);
+  const generic = genericSentinelAlertPayloadSchema.safeParse(payload);
   if (generic.success) {
     return normalizedAlertSchema.parse({
-      source: "operaiq",
+      source: "sentinel",
       title: generic.data.title,
       severity: generic.data.severity,
       affectedServices: [generic.data.service],

@@ -1,5 +1,5 @@
 {
-  "name": "@operaiq/api",
+  "name": "@sentinel/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,20 +10,16 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@google-cloud/pubsub": "^4.8.0",
-    "@operaiq/agent": "workspace:*",
-    "@operaiq/brain": "workspace:*",
-    "@operaiq/shared": "workspace:*",
-    "@operaiq/splunk-brain": "workspace:*",
+    "@sentinel/agent": "workspace:*",
+    "@sentinel/shared": "workspace:*",
+    "@sentinel/splunk-brain": "workspace:*",
     "@slack/web-api": "^7.8.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "google-auth-library": "^9.15.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
-    "mongodb": "^6.12.0",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "zod": "^3.24.1"

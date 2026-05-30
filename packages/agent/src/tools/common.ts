@@ -1,12 +1,7 @@
 import { z } from "zod";
-import { createLogger } from "@operaiq/shared";
-import { getAgentEnv } from "../env.js";
+import { createLogger } from "@sentinel/shared";
 
-export const toolLogger = createLogger("operaiq-tools");
-
-export function databaseName(): string {
-  return getAgentEnv().MONGODB_DATABASE_NAME;
-}
+export const toolLogger = createLogger("sentinel-tools");
 
 export function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
@@ -25,23 +20,7 @@ export function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
-export function idToString(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null && "toString" in value && typeof value.toString === "function") {
-    return value.toString();
-  }
-  return "";
-}
-
 export const isoDateStringSchema = z.string().datetime();
-
-export function objectIdMatchExpression(id: string): Record<string, unknown> {
-  return { $expr: { $eq: [{ $toString: "$_id" }, id] } };
-}
-
-export function dateFromStringExpression(field: string): Record<string, unknown> {
-  return { $dateFromString: { dateString: field } };
-}
 
 export function invocationStarted(tool: string, input: unknown): void {
   toolLogger.info({ tool, input, timestamp: new Date().toISOString() }, "Tool invocation started");

@@ -1,9 +1,14 @@
 import { z } from "zod";
-import { splunkHecSend, splunkKvGet, splunkKvPut } from "@operaiq/splunk-mcp";
+import { splunkHecSend, splunkKvGet, splunkKvPut } from "@sentinel/splunk-mcp";
 import { generatePostmortemFields } from "../gemini.js";
 import { writePostmortemSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
-import type { WritePostmortemResult } from "./write-postmortem.js";
+
+export type WritePostmortemResult = {
+  postmortemId: string;
+  summary: string;
+  preventionActions: string[];
+};
 
 export const sentinelWritePostmortemInputSchema = z.object({
   incidentId: z.string().regex(/^[a-f\d]{24}$/i),
@@ -12,7 +17,7 @@ export const sentinelWritePostmortemInputSchema = z.object({
     z.object({
       timestamp: z.string().datetime(),
       event: z.string().min(1),
-      actor: z.enum(["sentinel", "operaiq", "human"])
+      actor: z.enum(["sentinel", "human"])
     })
   ).min(1),
   rootCause: z.string().min(5),
@@ -93,7 +98,11 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
       }
     });
 
-    const result = { postmortemId: inserted.key };
+    const result = {
+      postmortemId: inserted.key,
+      summary: generated.summary,
+      preventionActions: generated.preventionActions
+    };
     invocationFinished("write_postmortem", result);
     return result;
   } catch (error: unknown) {

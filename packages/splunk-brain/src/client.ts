@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import tls from "node:tls";
 import { Buffer } from "node:buffer";
-import { createLogger } from "@operaiq/shared";
+import { createLogger } from "@sentinel/shared";
 import { z } from "zod";
 import { getSplunkEnv, type SplunkEnv } from "./env.js";
 

@@ -5,7 +5,7 @@ steps:
       - -f
       - apps/api/Dockerfile
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/api:$SHORT_SHA
       - .
   - name: gcr.io/cloud-builders/docker
     args:
@@ -13,7 +13,7 @@ steps:
       - -f
       - apps/web/Dockerfile
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/web:$SHORT_SHA
       - .
   - name: gcr.io/cloud-builders/docker
     args:
@@ -21,28 +21,28 @@ steps:
       - -f
       - packages/agent/Dockerfile.remediation
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/remediation:$SHORT_SHA
       - .
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/api:$SHORT_SHA
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/web:$SHORT_SHA
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/remediation:$SHORT_SHA
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       - run
       - deploy
-      - operaiq-api
+      - sentinel-api
       - --image
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/api:$SHORT_SHA
       - --region
       - ${_REGION}
       - --platform
@@ -53,9 +53,9 @@ steps:
     args:
       - run
       - deploy
-      - operaiq-web
+      - sentinel-web
       - --image
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/web:$SHORT_SHA
       - --region
       - ${_REGION}
       - --platform
@@ -68,8 +68,8 @@ steps:
       - |
         set -euo pipefail
         for action in scale-service restart-pod purge-cache rotate-connection-pool notify-team; do
-          gcloud run jobs deploy "operaiq-remediate-$${action}" \
-            --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA" \
+          gcloud run jobs deploy "sentinel-remediate-$${action}" \
+            --image "${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/remediation:$SHORT_SHA" \
             --region "${_REGION}" \
             --set-env-vars "GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID,GOOGLE_CLOUD_REGION=${_REGION}" \
             --max-retries 0
@@ -77,6 +77,6 @@ steps:
 substitutions:
   _REGION: us-central1
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/api:$SHORT_SHA
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/web:$SHORT_SHA
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/operaiq/remediation:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/api:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/web:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/sentinel/remediation:$SHORT_SHA

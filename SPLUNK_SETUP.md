@@ -189,19 +189,19 @@ FAILED splunk-hosted-models-probe - probeHostedModels() returned false; Sentinel
 Then run Sentinel agent checks:
 
 ```bash
-OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:test-tools
-OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 pnpm sentinel:smoke-test
+SENTINEL_AI_PROVIDER=offline SENTINEL_LOCAL_VERIFY=true SENTINEL_REMEDIATION_WAIT_MS=0 pnpm sentinel:test-tools
+SENTINEL_AI_PROVIDER=offline SENTINEL_LOCAL_VERIFY=true SENTINEL_REMEDIATION_WAIT_MS=0 pnpm sentinel:smoke-test
 ```
 
 For API webhook e2e, start the API first:
 
 ```bash
 pnpm build
-OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel PORT=3001 node apps/api/dist/server.js
-OPERAIQ_AI_PROVIDER=offline OPERAIQ_LOCAL_VERIFY=true OPERAIQ_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm sentinel:e2e
+SENTINEL_AI_PROVIDER=offline SENTINEL_LOCAL_VERIFY=true SENTINEL_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel PORT=3001 node apps/api/dist/server.js
+SENTINEL_AI_PROVIDER=offline SENTINEL_LOCAL_VERIFY=true SENTINEL_REMEDIATION_WAIT_MS=0 SENTINEL_MODE=true AGENT_NAME=Sentinel NEXT_PUBLIC_API_URL=http://localhost:3001 pnpm sentinel:e2e
 ```
 
-If `.env` sets `OPERAIQ_GENERATION_PROVIDER=nvidia` or another OpenAI-compatible free model, that provider takes precedence over `OPERAIQ_AI_PROVIDER=offline`. This is allowed for local free-model validation; generated post-mortem arrays are normalized before writing to KV Store and HEC.
+If `.env` sets `SENTINEL_GENERATION_PROVIDER=nvidia` or another OpenAI-compatible free model, that provider takes precedence over `SENTINEL_AI_PROVIDER=offline`. This is allowed for local free-model validation; generated post-mortem arrays are normalized before writing to KV Store and HEC.
 
 ## Splunk Alert Action
 

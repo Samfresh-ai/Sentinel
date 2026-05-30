@@ -24,8 +24,3 @@ services:
       - "3000:3000"
     depends_on:
       - api
-
-  mongodb-proxy:
-    image: alpine/socat:1.8.0.0
-    command: ["-d", "-d", "TCP-LISTEN:27017,fork,reuseaddr", "OPENSSL:${MONGODB_PROXY_TARGET:-cluster0.example.mongodb.net}:27017,verify=0"]
-    profiles: ["atlas-proxy"]

@@ -12,7 +12,7 @@ const optionalUrl = z.preprocess(
 
 export const severitySchema = z.enum(["P1", "P2", "P3", "P4"]);
 export const incidentStatusSchema = z.enum(["open", "resolved", "in_progress", "escalated", "failed"]);
-export const actorSchema = z.enum(["sentinel", "operaiq", "human"]);
+export const actorSchema = z.enum(["sentinel", "human"]);
 export const remediationActionSchema = z.enum([
   "scale_service",
   "restart_pod",
@@ -24,13 +24,11 @@ export const riskLevelSchema = z.enum(["low", "medium", "high"]);
 export const agentStepTypeSchema = z.enum(["ASSESS", "REMEMBER", "INVESTIGATE", "MAP", "RETRIEVE", "ACT", "VERIFY", "CLOSE", "ESCALATE", "ERROR"]);
 
 export const envSchema = z.object({
-  MONGODB_ATLAS_URI: z.string().min(1),
-  MONGODB_DATABASE_NAME: z.string().min(1).default("sentinel"),
   GOOGLE_CLOUD_PROJECT_ID: optionalNonEmptyString,
   GOOGLE_CLOUD_REGION: z.string().min(1).default("us-central1"),
   VERTEX_AI_LOCATION: z.string().min(1).default("us-central1"),
-  OPERAIQ_AI_PROVIDER: z.enum(["vertex", "offline"]).default("vertex"),
-  OPERAIQ_GENERATION_PROVIDER: z.preprocess(
+  SENTINEL_AI_PROVIDER: z.enum(["vertex", "offline"]).default("vertex"),
+  SENTINEL_GENERATION_PROVIDER: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.enum(["vertex", "offline", "nvidia", "openai-compatible"]).optional()
   ),
@@ -41,15 +39,13 @@ export const envSchema = z.object({
   OPENAI_COMPATIBLE_BASE_URL: optionalUrl,
   OPENAI_COMPATIBLE_MODEL: optionalNonEmptyString,
   AGENT_BUILDER_AGENT_ID: z.string().optional(),
-  PUBSUB_ALERT_TOPIC: z.string().min(1).default("sentinel-alerts"),
-  PUBSUB_EVENTS_TOPIC: z.string().min(1).default("sentinel-agent-events"),
   SLACK_BOT_TOKEN: z.string().optional(),
   SLACK_DEFAULT_INCIDENT_CHANNEL: z.string().optional(),
   SLACK_SIGNING_SECRET: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3001),
   WEBHOOK_SECRET: z.string().min(1),
   AGENT_TOOL_SECRET: optionalNonEmptyString,
-  OPERAIQ_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
+  SENTINEL_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   API_PUBLIC_URL: optionalUrl,
   NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:3001")
@@ -134,9 +130,9 @@ export const prometheusAlertSchema = z
   })
   .passthrough();
 
-export const genericOperaIqAlertPayloadSchema = z
+export const genericSentinelAlertPayloadSchema = z
   .object({
-    source: z.literal("operaiq").default("operaiq"),
+    source: z.literal("sentinel").default("sentinel"),
     title: z.string().min(1),
     severity: severitySchema,
     service: z.string().min(1),
@@ -148,7 +144,7 @@ export const genericOperaIqAlertPayloadSchema = z
   .passthrough();
 
 export const normalizedAlertSchema = z.object({
-  source: z.enum(["pagerduty", "datadog", "prometheus", "operaiq", "sentinel"]),
+  source: z.enum(["pagerduty", "datadog", "prometheus", "sentinel"]),
   title: z.string().min(1),
   severity: severitySchema,
   affectedServices: z.array(z.string().min(1)).min(1),
@@ -159,7 +155,7 @@ export const normalizedAlertSchema = z.object({
 });
 
 export const webhookPayloadSchema = z.union([
-  genericOperaIqAlertPayloadSchema,
+  genericSentinelAlertPayloadSchema,
   pagerDutyWebhookPayloadSchema,
   datadogMonitorPayloadSchema,
   prometheusAlertSchema
@@ -207,7 +203,7 @@ export type RiskLevel = z.infer<typeof riskLevelSchema>;
 export type RemediationAction = z.infer<typeof remediationActionSchema>;
 export type AgentStepType = z.infer<typeof agentStepTypeSchema>;
 export type NormalizedAlert = z.infer<typeof normalizedAlertSchema>;
-export type GenericOperaIqAlertPayload = z.infer<typeof genericOperaIqAlertPayloadSchema>;
+export type GenericSentinelAlertPayload = z.infer<typeof genericSentinelAlertPayloadSchema>;
 export type RunbookStep = z.infer<typeof runbookStepSchema>;
 export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type ExecuteRemediationInput = z.infer<typeof executeRemediationInputSchema>;

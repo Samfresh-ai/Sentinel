@@ -8,7 +8,7 @@ import {
   updateDocument,
   type SplunkHECEvent,
   type SplunkSearchResult
-} from "@operaiq/splunk-brain";
+} from "@sentinel/splunk-brain";
 
 export async function splunkSearch(query: string, earliest?: string, latest?: string): Promise<SplunkSearchResult[]> {
   return runSearch(query, {

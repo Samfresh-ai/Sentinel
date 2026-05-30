@@ -1,4 +1,4 @@
-import { createLogger } from "@operaiq/shared";
+import { createLogger } from "@sentinel/shared";
 import { runSearch } from "./search.js";
 import type { SplunkSearchResult } from "./types.js";
 

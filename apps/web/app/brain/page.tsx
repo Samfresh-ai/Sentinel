@@ -31,7 +31,7 @@ function runtimeModeLabel(mode: RuntimeReadiness["mode"] | undefined): string {
   if (mode === "production-blocked") return "Production blocked";
   if (mode === "autonomous-ready") return "Autonomous ready";
   if (mode === "local-verification") return "Local verification";
-  if (mode === "demo") return "Test timing";
+  if (mode === "test-timing") return "Test timing";
   return "Checking runtime";
 }
 
@@ -84,7 +84,7 @@ export default function BrainPage() {
             <div className="mt-1 text-[13px] text-foreground">{runtimeModeLabel(runtime?.mode)}</div>
           </div>
           <div className="font-mono text-[11px] uppercase tracking-[0.06em] text-muted">
-            {runtime?.production ? "Production" : "Non-production"} · {runtime?.localVerification ? "Local action recording" : "Real action path"} · {runtime?.demoTiming ? "Test timing" : "Live timing"}
+            {runtime?.production ? "Production" : "Non-production"} · {runtime?.localVerification ? "Local action recording" : "Real action path"} · {runtime?.testTiming ? "Test timing" : "Live timing"}
           </div>
         </div>
         {runtime?.violations?.length ? (

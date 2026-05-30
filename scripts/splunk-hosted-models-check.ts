@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { splunkRestRequest } from "@operaiq/splunk-brain";
-import { HOSTED_MODELS_AVAILABLE } from "@operaiq/splunk-brain/models";
+import { splunkRestRequest } from "@sentinel/splunk-brain";
+import { HOSTED_MODELS_AVAILABLE } from "@sentinel/splunk-brain/models";
 import { z } from "zod";
 
 const SplunkEntriesSchema = z.object({

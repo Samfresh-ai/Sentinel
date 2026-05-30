@@ -1,4 +1,4 @@
-import { loadRootEnv } from "@operaiq/shared";
+import { loadRootEnv } from "@sentinel/shared";
 import { z } from "zod";
 
 loadRootEnv();
@@ -14,13 +14,11 @@ const optionalUrl = z.preprocess(
 );
 
 const agentEnvSchema = z.object({
-  MONGODB_ATLAS_URI: z.string().min(1),
-  MONGODB_DATABASE_NAME: z.string().min(1).default("sentinel"),
   GOOGLE_CLOUD_PROJECT_ID: optionalNonEmptyString,
   GOOGLE_CLOUD_REGION: z.string().min(1).default("us-central1"),
   VERTEX_AI_LOCATION: z.string().min(1).default("us-central1"),
-  OPERAIQ_AI_PROVIDER: z.enum(["vertex", "offline"]).default("vertex"),
-  OPERAIQ_GENERATION_PROVIDER: z.preprocess(
+  SENTINEL_AI_PROVIDER: z.enum(["vertex", "offline"]).default("vertex"),
+  SENTINEL_GENERATION_PROVIDER: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.enum(["vertex", "offline", "nvidia", "openai-compatible"]).optional()
   ),
@@ -35,9 +33,8 @@ const agentEnvSchema = z.object({
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   WEBHOOK_SECRET: optionalNonEmptyString,
   AGENT_TOOL_SECRET: optionalNonEmptyString,
-  OPERAIQ_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
+  SENTINEL_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
   CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("sentinel-remediate"),
-  MONGODB_MCP_SERVER_COMMAND: z.string().optional(),
   AGENT_NAME: z.string().min(1).default("Sentinel")
 });
 

@@ -14,14 +14,12 @@ The temporary combined shape still works because `apps/api/Dockerfile` serves th
 
 ```text
 NODE_ENV=production
-OPERAIQ_RUNTIME_ENV=production
+SENTINEL_RUNTIME_ENV=production
 SENTINEL_MODE=true
 AGENT_NAME=Sentinel
-OPERAIQ_REMEDIATION_BACKEND=admin-endpoint
-OPERAIQ_GENERATION_PROVIDER=nvidia
+SENTINEL_REMEDIATION_BACKEND=admin-endpoint
+SENTINEL_GENERATION_PROVIDER=nvidia
 NVIDIA_API_KEY=<secret>
-MONGODB_ATLAS_URI=<secret>
-MONGODB_DATABASE_NAME=sentinel
 JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>

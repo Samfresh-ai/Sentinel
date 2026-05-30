@@ -1,14 +1,11 @@
-import { ObjectId } from "mongodb";
 import { JobsClient } from "@google-cloud/run";
 import { WebClient } from "@slack/web-api";
-import { splunkHecSend, splunkKvPut, splunkKvQuery } from "@operaiq/splunk-mcp";
-import { remediationExecutionsCollection } from "@operaiq/brain";
-import { executeRemediationInputSchema, type ExecuteRemediationResult, type RemediationAction, type RiskLevel } from "@operaiq/shared";
-import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@operaiq/shared";
-import { mongoAggregate, mongoFind } from "../mcp.js";
+import { splunkHecSend, splunkKvPut, splunkKvQuery } from "@sentinel/splunk-mcp";
+import { executeRemediationInputSchema, type ExecuteRemediationResult, type RemediationAction, type RiskLevel } from "@sentinel/shared";
+import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@sentinel/shared";
 import { getAgentEnv } from "../env.js";
 import { executeRemediationSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
-import { asString, asStringArray, databaseName, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
+import { asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
 
 type ServiceExecutionConfig = {
   name: string;
@@ -33,25 +30,21 @@ function isLocalVerifyMode(): boolean {
   return canUseLocalVerificationEffect();
 }
 
-function isSentinelMode(): boolean {
-  return process.env.SENTINEL_MODE?.toLowerCase() === "true" || getAgentEnv().AGENT_NAME.toLowerCase() === "sentinel";
-}
-
 function agentName(): string {
-  return isSentinelMode() ? "Sentinel" : "OperaIQ";
+  return "Sentinel";
 }
 
 function cloudRunJobResource(action: RemediationAction): string {
   const env = getAgentEnv();
   if (!env.GOOGLE_CLOUD_PROJECT_ID) {
-    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when OPERAIQ_REMEDIATION_BACKEND=cloud-run");
+    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when SENTINEL_REMEDIATION_BACKEND=cloud-run");
   }
   const jobName = `${env.CLOUD_RUN_REMEDIATION_JOB_PREFIX}-${action.replaceAll("_", "-")}`;
   return `projects/${env.GOOGLE_CLOUD_PROJECT_ID}/locations/${env.GOOGLE_CLOUD_REGION}/jobs/${jobName}`;
 }
 
 function remediationBackend(): "cloud-run" | "admin-endpoint" {
-  return getAgentEnv().OPERAIQ_REMEDIATION_BACKEND;
+  return getAgentEnv().SENTINEL_REMEDIATION_BACKEND;
 }
 
 function slackClient(): WebClient {
@@ -63,7 +56,7 @@ function slackClient(): WebClient {
 }
 
 async function serviceConfig(targetService: string, orgId?: string): Promise<ServiceExecutionConfig> {
-  if (isSentinelMode() && orgId) {
+  if (orgId) {
     const serviceDoc = (await splunkKvQuery("services", { name: targetService }, 1, orgId))[0];
     if (!serviceDoc) {
       return {
@@ -84,29 +77,12 @@ async function serviceConfig(targetService: string, orgId?: string): Promise<Ser
     };
   }
 
-  const serviceDocs = await mongoFind({
-    database: databaseName(),
-    collection: "services",
-    filter: { name: targetService },
-    limit: 1
-  });
-  const serviceDoc = serviceDocs[0];
-  if (!serviceDoc) {
-    throw new Error(`Service ${targetService} not found in MongoDB brain`);
-  }
-  const runtimeDocs = await mongoFind({
-    database: databaseName(),
-    collection: "service_runtime_configs",
-    filter: { serviceName: targetService },
-    limit: 1
-  });
-  const runtimeDoc = runtimeDocs[0];
   return {
-    name: asString(serviceDoc.name),
-    owners: asStringArray(serviceDoc.owners),
-    incidentChannel: asString(runtimeDoc?.incidentChannel) || getAgentEnv().SLACK_DEFAULT_INCIDENT_CHANNEL || null,
-    adminBaseUrl: asString(runtimeDoc?.adminBaseUrl) || null,
-    cloudRunServiceName: asString(runtimeDoc?.cloudRunServiceName) || null
+    name: targetService,
+    owners: [],
+    incidentChannel: getAgentEnv().SLACK_DEFAULT_INCIDENT_CHANNEL || (isLocalVerifyMode() ? "local-verify" : null),
+    adminBaseUrl: null,
+    cloudRunServiceName: null
   };
 }
 
@@ -141,7 +117,7 @@ async function logExecution(input: {
   executedAt: Date;
   orgId?: string;
 }): Promise<void> {
-  if (isSentinelMode() && input.orgId) {
+  if (input.orgId) {
     const document = {
       orgId: input.orgId,
       action: input.action,
@@ -166,17 +142,20 @@ async function logExecution(input: {
     return;
   }
 
-  await (await remediationExecutionsCollection()).insertOne({
-    _id: new ObjectId(),
-    action: input.action,
-    targetService: input.targetService,
-    parameters: input.parameters,
-    riskLevel: input.riskLevel,
-    success: input.success,
-    output: input.output,
-    requiresHumanApproval: input.requiresHumanApproval,
-    executedAt: input.executedAt,
-    createdAt: new Date()
+  await splunkHecSend({
+    sourcetype: "sentinel:remediation",
+    event: {
+      type: "remediation_execution",
+      action: input.action,
+      targetService: input.targetService,
+      parameters: input.parameters,
+      riskLevel: input.riskLevel,
+      success: input.success,
+      output: input.output,
+      requiresHumanApproval: input.requiresHumanApproval,
+      executedAt: input.executedAt.toISOString(),
+      generatedBy: "sentinel"
+    }
   });
 }
 
@@ -256,7 +235,7 @@ function jobEnv(input: {
 }): Array<{ name: string; value: string }> {
   const env = getAgentEnv();
   if (!env.GOOGLE_CLOUD_PROJECT_ID) {
-    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when OPERAIQ_REMEDIATION_BACKEND=cloud-run");
+    throw new Error("GOOGLE_CLOUD_PROJECT_ID is required when SENTINEL_REMEDIATION_BACKEND=cloud-run");
   }
   return [
     { name: "REMEDIATION_ACTION", value: input.action },
@@ -306,7 +285,7 @@ async function dispatchAdminEndpoint(
   const env = getAgentEnv();
   const secret = env.AGENT_TOOL_SECRET ?? env.WEBHOOK_SECRET;
   if (!secret) {
-    throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when OPERAIQ_REMEDIATION_BACKEND=admin-endpoint");
+    throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when SENTINEL_REMEDIATION_BACKEND=admin-endpoint");
   }
   const endpoint = `${config.adminBaseUrl.replace(/\/+$/, "")}/admin/remediation`;
   const response = await fetch(endpoint, {

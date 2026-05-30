@@ -80,7 +80,7 @@ export const writePostmortemSchema: JsonSchema = {
         properties: {
           timestamp: { type: "string" },
           event: { type: "string" },
-          actor: { type: "string", enum: ["sentinel", "operaiq", "human"] }
+          actor: { type: "string", enum: ["sentinel", "human"] }
         }
       }
     },

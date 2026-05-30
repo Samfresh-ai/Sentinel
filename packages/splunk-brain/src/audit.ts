@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createLogger } from "@operaiq/shared";
+import { createLogger } from "@sentinel/shared";
 import { createCollection, insertDocument } from "./kvstore.js";
 import { sendEvent } from "./hec.js";
 

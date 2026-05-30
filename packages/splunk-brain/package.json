@@ -1,5 +1,5 @@
 {
-  "name": "@operaiq/splunk-brain",
+  "name": "@sentinel/splunk-brain",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,7 +20,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@operaiq/shared": "workspace:*",
+    "@sentinel/shared": "workspace:*",
     "pino": "^9.6.0",
     "zod": "^3.24.1"
   },

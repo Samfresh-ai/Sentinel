@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createCollection, deleteDocument, getSplunkConfig, insertDocument, sendEvent, splunkRestRequest } from "@operaiq/splunk-brain";
+import { createCollection, deleteDocument, getSplunkConfig, insertDocument, sendEvent, splunkRestRequest } from "@sentinel/splunk-brain";
 import { z } from "zod";
 
 function writeLine(line: string): void {

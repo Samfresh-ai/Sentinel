@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { getSentinelIncident, runSearch } from "@operaiq/splunk-brain";
-import { ensureDemoOrg } from "./demo/org.js";
+import { getSentinelIncident, runSearch } from "@sentinel/splunk-brain";
+import { ensureSeedOrg } from "./test-org.js";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -24,11 +24,11 @@ async function delay(ms: number): Promise<void> {
 async function main(): Promise<void> {
   process.env.SENTINEL_MODE = "true";
   process.env.AGENT_NAME = "Sentinel";
-  process.env.OPERAIQ_LOCAL_VERIFY = process.env.OPERAIQ_LOCAL_VERIFY ?? "true";
-  process.env.OPERAIQ_REMEDIATION_WAIT_MS = process.env.OPERAIQ_REMEDIATION_WAIT_MS ?? "0";
-  process.env.OPERAIQ_AI_PROVIDER = process.env.OPERAIQ_AI_PROVIDER ?? "offline";
+  process.env.SENTINEL_LOCAL_VERIFY = process.env.SENTINEL_LOCAL_VERIFY ?? "true";
+  process.env.SENTINEL_REMEDIATION_WAIT_MS = process.env.SENTINEL_REMEDIATION_WAIT_MS ?? "0";
+  process.env.SENTINEL_AI_PROVIDER = process.env.SENTINEL_AI_PROVIDER ?? "offline";
 
-  const org = await ensureDemoOrg();
+  const org = await ensureSeedOrg();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
   const webhook = await requestJson<{ incidentId: string; status: string }>(`${apiUrl}/webhooks/splunk-alert?orgId=${encodeURIComponent(org.orgId)}&secret=${encodeURIComponent(org.webhookSecret)}`, {
     method: "POST",

@@ -1,8 +1,24 @@
 import { z } from "zod";
-import { splunkKvQuery } from "@operaiq/splunk-mcp";
+import { splunkKvQuery } from "@sentinel/splunk-mcp";
 import { getServiceDependencyGraphSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
-import type { ServiceDependencyGraph, ServiceGraphNode } from "./get-service-dependency-graph.js";
+
+export type ServiceGraphNode = {
+  name: string;
+  team: string;
+  language: string;
+  dependencies: string[];
+  dependents: string[];
+  knownFragilePoints: string[];
+  slaMs: number;
+  owners: string[];
+};
+
+export type ServiceDependencyGraph = {
+  service: ServiceGraphNode;
+  dependencies: ServiceGraphNode[];
+  dependents: ServiceGraphNode[];
+};
 
 export const sentinelGetServiceDependencyGraphInputSchema = z.object({
   serviceName: z.string().min(1),

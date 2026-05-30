@@ -1,4 +1,4 @@
-export type RuntimeMode = "local-verification" | "demo" | "autonomous-ready" | "production-blocked";
+export type RuntimeMode = "local-verification" | "test-timing" | "autonomous-ready" | "production-blocked";
 
 function envValue(env: NodeJS.ProcessEnv, key: string): string {
   return (env[key] ?? "").trim();
@@ -13,7 +13,7 @@ function hasEnv(env: NodeJS.ProcessEnv, key: string): boolean {
 }
 
 function generationProvider(env: NodeJS.ProcessEnv): string {
-  return envValue(env, "OPERAIQ_GENERATION_PROVIDER").toLowerCase() || envValue(env, "OPERAIQ_AI_PROVIDER").toLowerCase() || "vertex";
+  return envValue(env, "SENTINEL_GENERATION_PROVIDER").toLowerCase() || envValue(env, "SENTINEL_AI_PROVIDER").toLowerCase() || "vertex";
 }
 
 function isLocalUrl(value: string): boolean {
@@ -46,15 +46,15 @@ function isLocalHostname(value: string): boolean {
 }
 
 export function isLocalVerificationMode(env: NodeJS.ProcessEnv = process.env): boolean {
-  return booleanEnv(env, "OPERAIQ_LOCAL_VERIFY");
+  return booleanEnv(env, "SENTINEL_LOCAL_VERIFY");
 }
 
-export function isDemoTimingMode(env: NodeJS.ProcessEnv = process.env): boolean {
-  return hasEnv(env, "DEMO_REMEDIATION_WAIT_MS");
+export function isTestTimingMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return hasEnv(env, "SENTINEL_TEST_REMEDIATION_WAIT_MS");
 }
 
 export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (envValue(env, "OPERAIQ_RUNTIME_ENV").toLowerCase() === "production") return true;
+  if (envValue(env, "SENTINEL_RUNTIME_ENV").toLowerCase() === "production") return true;
   if (booleanEnv(env, "SENTINEL_PRODUCTION_MODE")) return true;
   if (envValue(env, "NODE_ENV").toLowerCase() !== "production") return false;
   const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
@@ -63,7 +63,7 @@ export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 export function canUseLocalVerificationEffect(env: NodeJS.ProcessEnv = process.env): boolean {
-  return !isProductionRuntime(env) && (isLocalVerificationMode(env) || isDemoTimingMode(env));
+  return !isProductionRuntime(env) && (isLocalVerificationMode(env) || isTestTimingMode(env));
 }
 
 export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -71,16 +71,16 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
 
   const violations: string[] = [];
   if (isLocalVerificationMode(env)) {
-    violations.push("OPERAIQ_LOCAL_VERIFY=true records remediation instead of dispatching real action");
+    violations.push("SENTINEL_LOCAL_VERIFY=true records remediation instead of dispatching real action");
   }
-  if (isDemoTimingMode(env)) {
-    violations.push("DEMO_REMEDIATION_WAIT_MS is set and can alter Sentinel verification timing");
+  if (isTestTimingMode(env)) {
+    violations.push("SENTINEL_TEST_REMEDIATION_WAIT_MS is set and can alter Sentinel verification timing");
   }
-  if (envValue(env, "OPERAIQ_AI_PROVIDER").toLowerCase() === "offline") {
-    violations.push("OPERAIQ_AI_PROVIDER=offline is deterministic test reasoning, not production reasoning");
+  if (envValue(env, "SENTINEL_AI_PROVIDER").toLowerCase() === "offline") {
+    violations.push("SENTINEL_AI_PROVIDER=offline is deterministic test reasoning, not production reasoning");
   }
-  if (envValue(env, "OPERAIQ_GENERATION_PROVIDER").toLowerCase() === "offline") {
-    violations.push("OPERAIQ_GENERATION_PROVIDER=offline is deterministic test generation, not production generation");
+  if (envValue(env, "SENTINEL_GENERATION_PROVIDER").toLowerCase() === "offline") {
+    violations.push("SENTINEL_GENERATION_PROVIDER=offline is deterministic test generation, not production generation");
   }
   const provider = generationProvider(env);
   if (provider === "vertex" && !hasEnv(env, "GOOGLE_CLOUD_PROJECT_ID")) {
@@ -94,9 +94,9 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
       if (!hasEnv(env, key)) violations.push(`${key} is required when production generation uses an OpenAI-compatible provider`);
     }
   }
-  const remediationBackend = envValue(env, "OPERAIQ_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
+  const remediationBackend = envValue(env, "SENTINEL_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
   if (remediationBackend !== "cloud-run" && remediationBackend !== "admin-endpoint") {
-    violations.push("OPERAIQ_REMEDIATION_BACKEND must be cloud-run or admin-endpoint");
+    violations.push("SENTINEL_REMEDIATION_BACKEND must be cloud-run or admin-endpoint");
   }
   if (remediationBackend === "cloud-run" && !hasEnv(env, "GOOGLE_CLOUD_PROJECT_ID")) {
     violations.push("GOOGLE_CLOUD_PROJECT_ID is required when remediation backend is cloud-run");
@@ -135,12 +135,12 @@ export function runtimeReadiness(env: NodeJS.ProcessEnv = process.env): {
   mode: RuntimeMode;
   production: boolean;
   localVerification: boolean;
-  demoTiming: boolean;
+  testTiming: boolean;
   violations: string[];
 } {
   const production = isProductionRuntime(env);
   const localVerification = isLocalVerificationMode(env);
-  const demoTiming = isDemoTimingMode(env);
+  const testTiming = isTestTimingMode(env);
   const violations = productionReadinessViolations(env);
   const mode: RuntimeMode = production
     ? violations.length > 0
@@ -148,10 +148,10 @@ export function runtimeReadiness(env: NodeJS.ProcessEnv = process.env): {
       : "autonomous-ready"
     : localVerification
       ? "local-verification"
-      : demoTiming
-        ? "demo"
+      : testTiming
+        ? "test-timing"
         : "autonomous-ready";
-  return { mode, production, localVerification, demoTiming, violations };
+  return { mode, production, localVerification, testTiming, violations };
 }
 
 export function assertProductionSafeRuntime(component: string, env: NodeJS.ProcessEnv = process.env): void {

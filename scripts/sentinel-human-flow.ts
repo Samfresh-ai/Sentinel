@@ -8,7 +8,7 @@ import {
   runSearch,
   sendEvent,
   splunkRestRequest
-} from "@operaiq/splunk-brain";
+} from "@sentinel/splunk-brain";
 
 const DEFAULT_API_URL = "https://sentinel-api-n8ly.onrender.com";
 const CRON_SCHEDULE = "* * * * *";

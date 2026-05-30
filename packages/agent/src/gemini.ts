@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { HOSTED_MODELS_AVAILABLE, generateWithHostedModels } from "@operaiq/splunk-brain/models";
+import { HOSTED_MODELS_AVAILABLE, generateWithHostedModels } from "@sentinel/splunk-brain/models";
 import { z } from "zod";
 import { getAgentEnv, type AgentEnv } from "./env.js";
 
@@ -23,11 +23,11 @@ function getAiClient(): GoogleGenAI {
 type GenerationProvider = "vertex" | "offline" | "nvidia" | "openai-compatible";
 
 function generationProvider(env: AgentEnv): GenerationProvider {
-  return env.OPERAIQ_GENERATION_PROVIDER ?? env.OPERAIQ_AI_PROVIDER;
+  return env.SENTINEL_GENERATION_PROVIDER ?? env.SENTINEL_AI_PROVIDER;
 }
 
 function isOfflineAiProvider(): boolean {
-  return process.env.OPERAIQ_LOCAL_VERIFY?.toLowerCase() === "true" || generationProvider(getAgentEnv()) === "offline";
+  return process.env.SENTINEL_LOCAL_VERIFY?.toLowerCase() === "true" || generationProvider(getAgentEnv()) === "offline";
 }
 
 function extractJson(text: string): unknown {
@@ -112,7 +112,7 @@ function openAiCompatibleConfig(env: AgentEnv): { apiKey: string; baseUrl: strin
   const provider = generationProvider(env);
   if (provider === "nvidia") {
     if (!env.NVIDIA_API_KEY) {
-      throw new Error("NVIDIA_API_KEY is required when OPERAIQ_GENERATION_PROVIDER=nvidia");
+      throw new Error("NVIDIA_API_KEY is required when SENTINEL_GENERATION_PROVIDER=nvidia");
     }
     return {
       apiKey: env.NVIDIA_API_KEY,
@@ -123,7 +123,7 @@ function openAiCompatibleConfig(env: AgentEnv): { apiKey: string; baseUrl: strin
 
   if (!env.OPENAI_COMPATIBLE_API_KEY || !env.OPENAI_COMPATIBLE_BASE_URL || !env.OPENAI_COMPATIBLE_MODEL) {
     throw new Error(
-      "OPENAI_COMPATIBLE_API_KEY, OPENAI_COMPATIBLE_BASE_URL, and OPENAI_COMPATIBLE_MODEL are required when OPERAIQ_GENERATION_PROVIDER=openai-compatible"
+      "OPENAI_COMPATIBLE_API_KEY, OPENAI_COMPATIBLE_BASE_URL, and OPENAI_COMPATIBLE_MODEL are required when SENTINEL_GENERATION_PROVIDER=openai-compatible"
     );
   }
   return {
@@ -180,7 +180,7 @@ async function generateJsonText(prompt: string): Promise<string> {
 
 export async function generatePostmortemFields(input: {
   title: string;
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "operaiq" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
   rootCause: string;
   remediationTaken: string[];
   lessonLearned: string;

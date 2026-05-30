@@ -1,9 +1,19 @@
 import { z } from "zod";
-import { findSimilarIncidents } from "@operaiq/splunk-brain";
-import { splunkKvQuery } from "@operaiq/splunk-mcp";
+import { findSimilarIncidents } from "@sentinel/splunk-brain";
+import { splunkKvQuery } from "@sentinel/splunk-mcp";
 import { searchSimilarIncidentsSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNullableString, asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
-import type { SimilarIncident } from "./search-similar-incidents.js";
+
+export type SimilarIncident = {
+  id: string;
+  title: string;
+  rootCause: string | null;
+  resolution: string | null;
+  remediationSteps: string[];
+  durationMinutes: number | null;
+  severity: string;
+  similarity: number;
+};
 
 export const sentinelSearchSimilarIncidentsInputSchema = z.object({
   symptoms: z.array(z.string().min(1)).min(1),
@@ -13,7 +23,7 @@ export const sentinelSearchSimilarIncidentsInputSchema = z.object({
 });
 
 function tokens(values: string[]): string[] {
-  const stopwords = new Set(["sentinel", "demo", "service", "app", "prod", "alert"]);
+  const stopwords = new Set(["sentinel", "test-timing", "service", "app", "prod", "alert"]);
   return [
     ...new Set(
       values

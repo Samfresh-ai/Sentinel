@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { splunkSearch, type SplunkSearchResult } from "@operaiq/splunk-mcp";
+import { splunkSearch, type SplunkSearchResult } from "@sentinel/splunk-mcp";
 import { querySplunkLogsSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { invocationFailed, invocationFinished, invocationStarted } from "./common.js";
 

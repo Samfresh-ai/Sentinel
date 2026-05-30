@@ -35,14 +35,12 @@ Set these on `sentinel-api`:
 
 ```text
 NODE_ENV=production
-OPERAIQ_RUNTIME_ENV=production
+SENTINEL_RUNTIME_ENV=production
 SENTINEL_MODE=true
 AGENT_NAME=Sentinel
-OPERAIQ_REMEDIATION_BACKEND=admin-endpoint
-OPERAIQ_GENERATION_PROVIDER=nvidia
+SENTINEL_REMEDIATION_BACKEND=admin-endpoint
+SENTINEL_GENERATION_PROVIDER=nvidia
 NVIDIA_API_KEY=<secret>
-MONGODB_ATLAS_URI=<secret>
-MONGODB_DATABASE_NAME=sentinel
 JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>
@@ -68,7 +66,7 @@ Set these on `sentinel-web`:
 
 ```text
 NODE_ENV=production
-OPERAIQ_RUNTIME_ENV=production
+SENTINEL_RUNTIME_ENV=production
 NEXT_PUBLIC_API_URL=https://<sentinel-api-domain>
 NEXT_PUBLIC_SPLUNK_DASHBOARD_URL=https://<splunk-web>/en-US/app/sentinel/sentinel_overview
 ```
@@ -76,10 +74,10 @@ NEXT_PUBLIC_SPLUNK_DASHBOARD_URL=https://<splunk-web>/en-US/app/sentinel/sentine
 Do not set these in production:
 
 ```text
-OPERAIQ_LOCAL_VERIFY=true
-DEMO_REMEDIATION_WAIT_MS=...
-OPERAIQ_AI_PROVIDER=offline
-OPERAIQ_GENERATION_PROVIDER=offline
+SENTINEL_LOCAL_VERIFY=true
+SENTINEL_TEST_REMEDIATION_WAIT_MS=...
+SENTINEL_AI_PROVIDER=offline
+SENTINEL_GENERATION_PROVIDER=offline
 ```
 
 ## Remediation Backend
@@ -87,7 +85,7 @@ OPERAIQ_GENERATION_PROVIDER=offline
 For non-GCP deployment, Sentinel uses:
 
 ```text
-OPERAIQ_REMEDIATION_BACKEND=admin-endpoint
+SENTINEL_REMEDIATION_BACKEND=admin-endpoint
 ```
 
 That means `scale_service`, `restart_pod`, `purge_cache`, and `rotate_connection_pool` call the affected service's configured:
@@ -132,4 +130,4 @@ Use the Sentinel setup screen to create the org and get the webhook URL, then co
 - Vercel-only is not acceptable for full Sentinel because it does not host the stateful Splunk watcher.
 - Railway web/API without real Splunk is not acceptable.
 - A Splunk container without persistent `/opt/splunk/etc` and `/opt/splunk/var` is proof-only, not production.
-- `OPERAIQ_LOCAL_VERIFY=true` is proof mode only; production startup blocks it.
+- `SENTINEL_LOCAL_VERIFY=true` is proof mode only; production startup blocks it.

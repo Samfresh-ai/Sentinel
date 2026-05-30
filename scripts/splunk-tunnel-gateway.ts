@@ -1,6 +1,6 @@
 import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
-import { loadRootEnv } from "@operaiq/shared";
+import { loadRootEnv } from "@sentinel/shared";
 
 loadRootEnv();
 

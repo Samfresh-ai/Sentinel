@@ -1,8 +1,6 @@
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
-import { MongoClient } from "mongodb";
-import { PubSub } from "@google-cloud/pubsub";
-import { isProductionRuntime, productionReadinessViolations } from "@operaiq/shared";
+import { isProductionRuntime, productionReadinessViolations } from "@sentinel/shared";
 
 function writeLine(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -21,11 +19,11 @@ function envValue(name: string): string {
 }
 
 function generationProvider(): string {
-  return envValue("OPERAIQ_GENERATION_PROVIDER").toLowerCase() || envValue("OPERAIQ_AI_PROVIDER").toLowerCase() || "vertex";
+  return envValue("SENTINEL_GENERATION_PROVIDER").toLowerCase() || envValue("SENTINEL_AI_PROVIDER").toLowerCase() || "vertex";
 }
 
 function remediationBackend(): string {
-  return envValue("OPERAIQ_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
+  return envValue("SENTINEL_REMEDIATION_BACKEND").toLowerCase() || "cloud-run";
 }
 
 function checkCommand(command: string, args: string[]): { ok: boolean; detail: string } {
@@ -37,38 +35,6 @@ function checkCommand(command: string, args: string[]): { ok: boolean; detail: s
     return { ok: false, detail: (result.stderr || result.stdout || `exit ${result.status}`).trim() };
   }
   return { ok: true, detail: (result.stdout || "ok").trim().split("\n")[0] ?? "ok" };
-}
-
-async function checkMongo(): Promise<{ ok: boolean; detail: string }> {
-  if (!hasEnv("MONGODB_ATLAS_URI")) {
-    return { ok: false, detail: "MONGODB_ATLAS_URI is missing" };
-  }
-  const client = new MongoClient(process.env.MONGODB_ATLAS_URI!, { serverSelectionTimeoutMS: 5000 });
-  try {
-    await client.db(process.env.MONGODB_DATABASE_NAME ?? "sentinel").command({ ping: 1 });
-    return { ok: true, detail: "Atlas ping succeeded" };
-  } catch (error: unknown) {
-    return { ok: false, detail: error instanceof Error ? error.message : "MongoDB ping failed" };
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-}
-
-async function checkPubSubTopic(name: string): Promise<{ ok: boolean; detail: string }> {
-  if (!hasEnv("GOOGLE_CLOUD_PROJECT_ID")) {
-    return { ok: false, detail: "GOOGLE_CLOUD_PROJECT_ID is missing" };
-  }
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (!projectId) {
-    return { ok: false, detail: "GOOGLE_CLOUD_PROJECT_ID is missing" };
-  }
-  const pubsub = new PubSub({ projectId });
-  try {
-    const [exists] = await pubsub.topic(name).exists();
-    return exists ? { ok: true, detail: `${name} exists` } : { ok: false, detail: `${name} does not exist` };
-  } catch (error: unknown) {
-    return { ok: false, detail: error instanceof Error ? error.message : "Pub/Sub check failed" };
-  }
 }
 
 async function callSlackApi<T extends { ok: boolean; error?: string }>(
@@ -114,21 +80,21 @@ async function checkSlack(): Promise<{ ok: boolean; detail: string }> {
 }
 
 async function main(): Promise<void> {
-  const localVerifyMode = booleanEnv("OPERAIQ_LOCAL_VERIFY");
-  const offlineAi = process.env.OPERAIQ_AI_PROVIDER === "offline";
-  const sentinelMode = booleanEnv("SENTINEL_MODE");
+  const localVerifyMode = booleanEnv("SENTINEL_LOCAL_VERIFY");
+  const offlineAi = process.env.SENTINEL_AI_PROVIDER === "offline";
   const provider = generationProvider();
   const backend = remediationBackend();
   const usesVertex = provider === "vertex";
   const usesCloudRun = backend === "cloud-run";
-  const usesPubSub = !sentinelMode;
   const productionMode = isProductionRuntime();
   const requiredVariables = [
-    "MONGODB_ATLAS_URI",
     "WEBHOOK_SECRET",
-    "NEXT_PUBLIC_API_URL"
+    "NEXT_PUBLIC_API_URL",
+    "SPLUNK_USERNAME",
+    "SPLUNK_PASSWORD",
+    "SPLUNK_HEC_TOKEN"
   ];
-  if (usesVertex || usesCloudRun || usesPubSub) {
+  if (usesVertex || usesCloudRun) {
     requiredVariables.push("GOOGLE_CLOUD_PROJECT_ID");
   }
   if (provider === "nvidia") {
@@ -158,7 +124,7 @@ async function main(): Promise<void> {
     });
   }
 
-  if (usesCloudRun || usesPubSub || usesVertex) {
+  if (usesCloudRun || usesVertex) {
     const gcloud = checkCommand("gcloud", ["--version"]);
     checks.push({ name: "gcloud", ...gcloud });
   } else {
@@ -168,18 +134,13 @@ async function main(): Promise<void> {
     const docker = checkCommand("docker", ["info"]);
     checks.push({ name: "docker-daemon", ...docker });
   }
-  checks.push({ name: "mongodb-atlas", ...(await checkMongo()) });
-  if (usesPubSub) {
-    checks.push({ name: "pubsub-alert-topic", ...(await checkPubSubTopic(process.env.PUBSUB_ALERT_TOPIC ?? "sentinel-alerts")) });
-    checks.push({ name: "pubsub-events-topic", ...(await checkPubSubTopic(process.env.PUBSUB_EVENTS_TOPIC ?? "sentinel-agent-events")) });
-  } else {
-    checks.push({ name: "pubsub", ok: true, detail: "skipped because Sentinel uses Splunk Alert Action webhooks" });
-  }
+  checks.push({ name: "splunk", ok: true, detail: "checked by scripts/splunk-setup-check.ts" });
+  checks.push({ name: "webhook-flow", ok: true, detail: "Sentinel uses Splunk Alert Action webhooks" });
   if (offlineAi) {
-    checks.push({ name: "vertex-ai", ok: true, detail: "skipped because OPERAIQ_AI_PROVIDER=offline" });
+    checks.push({ name: "vertex-ai", ok: true, detail: "skipped because SENTINEL_AI_PROVIDER=offline" });
   }
   if (localVerifyMode) {
-    checks.push({ name: "slack", ok: true, detail: "skipped because OPERAIQ_LOCAL_VERIFY=true" });
+    checks.push({ name: "slack", ok: true, detail: "skipped because SENTINEL_LOCAL_VERIFY=true" });
   } else if (hasEnv("SLACK_BOT_TOKEN") && hasEnv("SLACK_DEFAULT_INCIDENT_CHANNEL")) {
     checks.push({ name: "slack", ...(await checkSlack()) });
   }

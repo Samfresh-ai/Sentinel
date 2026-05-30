@@ -8,8 +8,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/package.json
-COPY packages/brain/package.json packages/brain/package.json
 COPY packages/agent/package.json packages/agent/package.json
+COPY packages/splunk-brain/package.json packages/splunk-brain/package.json
+COPY packages/splunk-mcp/package.json packages/splunk-mcp/package.json
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
@@ -22,8 +23,8 @@ ENV NEXT_PUBLIC_SPLUNK_DASHBOARD_URL=${NEXT_PUBLIC_SPLUNK_DASHBOARD_URL}
 COPY packages packages
 COPY apps/api apps/api
 COPY apps/web apps/web
-RUN pnpm --filter @operaiq/api... build
-RUN pnpm --filter @operaiq/web build
+RUN pnpm --filter @sentinel/api... build
+RUN pnpm --filter @sentinel/web build
 RUN mkdir -p /out/web/apps/web/.next \
   && cp -R apps/web/.next/standalone/. /out/web/ \
   && cp -R apps/web/.next/static /out/web/apps/web/.next/static \

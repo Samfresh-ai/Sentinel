@@ -8,14 +8,15 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/package.json
-COPY packages/brain/package.json packages/brain/package.json
+COPY packages/splunk-brain/package.json packages/splunk-brain/package.json
+COPY packages/splunk-mcp/package.json packages/splunk-mcp/package.json
 COPY packages/agent/package.json packages/agent/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY packages packages
-RUN pnpm --filter @operaiq/agent... build
-RUN pnpm --filter @operaiq/agent deploy --legacy --prod --no-optional /out
+RUN pnpm --filter @sentinel/agent... build
+RUN pnpm --filter @sentinel/agent deploy --legacy --prod --no-optional /out
 RUN find /out -type f \( -name '*.map' -o -name '*.ts' -o -name '*.tsx' -o -name '*.md' \) -delete \
   && find /out -type d \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name example -o -name examples -o -name benchmark -o -name benchmarks \) -prune -exec rm -rf '{}' + \
   && rm -rf /out/src /out/Dockerfile.remediation /out/tsconfig.json
