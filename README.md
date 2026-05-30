@@ -4,7 +4,7 @@
 
 > *The SRE that never forgets.*
 
-When your services break, Sentinel wakes up. No pager. No trigger command. No human in the loop.
+When your services break, Sentinel wakes up from a Splunk alert, investigates with the current logs, and either takes the approved low-risk action or escalates with the evidence it collected.
 
 It investigates the incident using live Splunk log data, cross-references its memory of every incident it has ever resolved, identifies the root cause, executes the remediation, verifies the fix worked, and writes a structured post-mortem back into Splunk. The next time the same pattern appears, it resolves faster because it already knows the answer.
 
@@ -32,7 +32,7 @@ Every resolved incident is written back to Splunk as a structured knowledge arti
 | First occurrence | No history | 21.6s | 13% |
 | Second occurrence | Learned | 7.1s | **95%** |
 
-The second incident resolved 3× faster. The brain compounds — the more Sentinel handles, the faster and more accurate it becomes.
+The second incident resolved 3x faster. The brain compounds: the more Sentinel handles, the faster and more accurate it becomes.
 
 ---
 
@@ -94,7 +94,7 @@ The UI is not a fake demo surface. Every incident, reasoning step, audit entry, 
 | Observability platform | Splunk Enterprise / Splunk Cloud |
 | Agent memory | Splunk KV Store + Splunk HEC (indexed post-mortems) |
 | Live log investigation | SPL via custom Splunk MCP REST adapter |
-| Hosted models | Splunk AI Toolkit 5.7.4 — capability-probed at startup; Gemini fallback on Enterprise |
+| Hosted models | Capability-probed at startup; fallback generation is used on local Enterprise when hosted inference is unavailable |
 | Backend | Node.js 20, TypeScript (strict), Express.js |
 | Frontend | Next.js 14 App Router, Tailwind CSS, Server-Sent Events (live reasoning stream) |
 | Auth | JWT, per-org webhook secrets |
@@ -102,10 +102,10 @@ The UI is not a fake demo surface. Every incident, reasoning step, audit entry, 
 
 ---
 
-## Quick test
+## Quick judge test
 
 Requirements: Docker, Node.js 20+, pnpm, a local Splunk Enterprise instance.
-See `SPLUNK_SETUP.md` for Splunk setup (15 minutes).
+See `SPLUNK_SETUP.md` for the Splunk Enterprise setup. This path exists so reviewers can test the real flow without wiring their own production app.
 
 ```bash
 git clone https://github.com/Samfresh-ai/Sentinel.git
@@ -115,23 +115,11 @@ docker compose up -d
 pnpm install
 pnpm splunk:setup-check    # confirms Splunk is reachable
 pnpm splunk:seed           # seeds KV Store with incident history
-pnpm sentinel:demo         # fires a live incident end to end
+pnpm splunk:verify         # confirms KV Store and HEC proof data
+pnpm sentinel:quick-test   # app logs -> saved search -> webhook -> ACT/VERIFY/CLOSE
 ```
 
-Open `http://localhost:3000`. A P1 incident will appear, stream through all eight reasoning phases, and resolve. The post-mortem lands in Splunk at `index=sentinel sourcetype=sentinel:postmortem`.
-
-**Learning loop proof:**
-```bash
-pnpm sentinel:demo:learning-loop
-# Incident 1 (novel):      resolved in 21.6s, best match: 13%
-# Incident 2 (recognised): resolved in 7.1s,  best match: 95%
-```
-
-**Escalation path proof:**
-```bash
-pnpm sentinel:demo:escalate
-# Fires an unknown incident type, watches Sentinel exhaust attempts and escalate
-```
+Open the Sentinel web URL after the script starts. A real Splunk saved search fires the webhook, Sentinel creates an incident, runs through the agent phases, verifies with SPL, closes the incident, and writes the post-mortem to Splunk. This is not a dashboard simulation button; it is the same path a production Splunk alert uses.
 
 ---
 
@@ -236,20 +224,18 @@ Google Cloud Run deployment: `cloudbuild.sentinel.yaml`
 
 ## Verification
 
-All of the following passed on 2026-05-27:
+All of the following passed on 2026-05-30 against the local Splunk Enterprise proof target:
 
 ```bash
 pnpm typecheck                   # zero type errors
 pnpm build                       # clean build
 pnpm splunk:setup-check          # Splunk REST, KV Store, HEC all reachable
-pnpm sentinel:e2e                # full incident lifecycle end to end
-pnpm sentinel:test-feedback-loop # remediation verify-and-retry path
-pnpm sentinel:demo:escalate      # unknown incident escalates correctly
-pnpm sentinel:demo:learning-loop # novel 21.6s → recognised 7.1s
-pnpm sentinel:test-dlq           # crashed agent recovered via dead letter queue
+pnpm splunk:seed && pnpm splunk:verify
+pnpm preflight
+pnpm sentinel:quick-test         # full Splunk alert lifecycle end to end
 ```
 
-Proof outputs, audit counts, and the shipped vs imagined table: `SENTINEL_VERIFICATION.md`
+The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git.
 
 ---
 
@@ -263,10 +249,7 @@ Proof outputs, audit counts, and the shipped vs imagined table: `SENTINEL_VERIFI
 | Splunk Alert Action autonomous trigger | ✅ Verified |
 | Native Splunk dashboard (6 panels) | ✅ Verified |
 | Multi-tenant org isolation (403 cross-org access) | ✅ Verified |
-| Audit log (498 entries across test runs) | ✅ Verified |
-| Dead letter queue + agent crash recovery | ✅ Verified |
-| Splunk AI Toolkit 5.7.4 + PSC 4.3.2 installed | ✅ Installed |
-| Splunk Hosted Models | ⚡ Capability-gated — probes at startup, Gemini fallback on Enterprise; activates automatically on Splunk Cloud Platform |
-| Splunk Cloud deployment | 🔄 Implemented and tested — pending active Cloud credentials |
-| SPL keyword similarity vs vector embeddings | ⚠️ Known gap — lower precision than vector search, documented in `SENTINEL_VERIFICATION.md` |
-| Cloud Run remediation (live infrastructure actions) | 🔄 Implemented — requires GCP billing enabled |
+| Audit log | ✅ Verified |
+| Splunk Hosted Models | ⚡ Capability-gated; fallback generation is used on local Enterprise |
+| Splunk Cloud deployment | 🔄 Supported in code and docs; pending active Cloud credentials and reachable HEC |
+| Cloud Run remediation (live infrastructure actions) | 🔄 Implemented; requires GCP billing and target services |

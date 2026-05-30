@@ -18,6 +18,7 @@
     "splunk:hosted-models-check": "tsx --conditions=development scripts/splunk-hosted-models-check.ts",
     "splunk:seed": "tsx --conditions=development scripts/splunk-seed.ts",
     "splunk:verify": "tsx --conditions=development scripts/splunk-verify.ts",
+    "sentinel:quick-test": "tsx --conditions=development scripts/sentinel-human-flow.ts",
     "sentinel:test-tools": "tsx --conditions=development scripts/sentinel-test-tools.ts",
     "sentinel:smoke-test": "tsx --conditions=development scripts/sentinel-smoke-test.ts",
     "sentinel:e2e": "tsx --conditions=development scripts/sentinel-e2e.ts"
