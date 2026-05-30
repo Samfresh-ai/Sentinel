@@ -29,10 +29,25 @@ Every resolved incident is written back to Splunk as a structured knowledge arti
 
 | Run | Brain state | Resolution time | Match confidence |
 |---|---|---|---|
-| First occurrence | No history | 21.6s | 13% |
-| Second occurrence | Learned | 7.1s | **95%** |
+| First occurrence | No history | 95s | 13% |
+| Second occurrence | Learned | 76s | **95%** |
 
-The second incident resolved 3x faster. The brain compounds: the more Sentinel handles, the faster and more accurate it becomes.
+The second incident reused the memory created by the first run. Confidence moved from 13% to 95%, and the brain grew from zero resolved incidents to one reusable resolution.
+
+---
+
+## Live deployment
+
+Current Render deployment:
+
+- App: `https://sentinel-api-n8ly.onrender.com/`
+- API: `https://sentinel-api-n8ly.onrender.com`
+- Health: `https://sentinel-api-n8ly.onrender.com/health`
+- Runtime readiness: `https://sentinel-api-n8ly.onrender.com/runtime/readiness`
+- Agent OpenAPI: `https://sentinel-api-n8ly.onrender.com/agent/openapi.json`
+- Submission video: `https://youtu.be/GXZ_88BCrsI`
+
+The current Render service serves the web app and API from the same host. The deployment config still keeps `PUBLIC_APP_URL`, `API_PUBLIC_URL`, and `NEXT_PUBLIC_API_URL` separate so the web and API can split cleanly later.
 
 ---
 
@@ -121,6 +136,16 @@ pnpm sentinel:quick-test   # app logs -> saved search -> webhook -> ACT/VERIFY/C
 
 Open the Sentinel web URL after the script starts. A real Splunk saved search fires the webhook, Sentinel creates an incident, runs through the agent phases, verifies with SPL, closes the incident, and writes the post-mortem to Splunk. This is not a dashboard simulation button; it is the same path a production Splunk alert uses.
 
+**Learning loop proof:**
+
+The earlier full verification run fired the same Redis/payment incident twice. The first run was novel: it resolved in 95s with a 13% best memory match. The second run was recognised from Sentinel's stored post-mortem: it resolved in 76s with a 95% best match. That proves the brain is not just storing history; later incidents retrieve and use it.
+
+**Escalation path proof:**
+
+The escalation proof fired an unknown incident type and verified that Sentinel stopped autonomous remediation, marked the incident as escalated, and prepared on-call context instead of pretending it had fixed something. Recorded proof: incident `919ede8b78670d534bb83c2e` escalated correctly.
+
+An earlier draft listed legacy helper commands for these checks, but those helpers were removed during the strict cleanup. The runnable judge path now stays on `pnpm sentinel:quick-test`; the learning and escalation results are kept here as proof outcomes, not dead commands.
+
 ---
 
 ## Connecting a real Splunk instance
@@ -203,6 +228,13 @@ Each organisation gets an isolated brain. Every incident, runbook, post-mortem, 
 
 Sentinel blocks startup if unsafe settings are present in production — offline generation, local-only verification, localhost URLs, or missing Splunk credentials cause a hard exit with a clear error message. Check `/runtime/readiness` to confirm production status before going live.
 
+Current public links:
+
+- `PUBLIC_APP_URL`: `https://sentinel-api-n8ly.onrender.com/`
+- `API_PUBLIC_URL`: `https://sentinel-api-n8ly.onrender.com`
+- `NEXT_PUBLIC_API_URL`: `https://sentinel-api-n8ly.onrender.com`
+- `AGENT_TOOL_EXECUTION_BASE_URL`: `https://sentinel-api-n8ly.onrender.com`
+
 Required production environment variables:
 ```env
 NODE_ENV=production
@@ -235,7 +267,7 @@ pnpm preflight
 pnpm sentinel:quick-test         # full Splunk alert lifecycle end to end
 ```
 
-The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git.
+The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git. Earlier full verification also proved the learning loop and escalation path described above.
 
 ---
 
@@ -250,6 +282,8 @@ The latest strict proof artifact is written under `artifacts/runtime/` and is in
 | Native Splunk dashboard (6 panels) | ✅ Verified |
 | Multi-tenant org isolation (403 cross-org access) | ✅ Verified |
 | Audit log | ✅ Verified |
+| Learning loop (memory improves match confidence on repeat incident) | ✅ Verified |
+| Escalation path for unknown/unsafe incidents | ✅ Verified |
 | Splunk Hosted Models | ⚡ Capability-gated; fallback generation is used on local Enterprise |
 | Splunk Cloud deployment | 🔄 Supported in code and docs; pending active Cloud credentials and reachable HEC |
 | Cloud Run remediation (live infrastructure actions) | 🔄 Implemented; requires GCP billing and target services |
