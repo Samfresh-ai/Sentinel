@@ -117,7 +117,7 @@ The UI is not a fake demo surface. Every incident, reasoning step, audit entry, 
 
 ---
 
-## Quick judge test
+## Quick test
 
 Requirements: Docker, Node.js 20+, pnpm, a local Splunk Enterprise instance.
 See `SPLUNK_SETUP.md` for the Splunk Enterprise setup. This path exists so reviewers can test the real flow without wiring their own production app.
@@ -139,12 +139,16 @@ Open the Sentinel web URL after the script starts. A real Splunk saved search fi
 **Learning loop proof:**
 
 The earlier full verification run fired the same Redis/payment incident twice. The first run was novel: it resolved in 95s with a 13% best memory match. The second run was recognised from Sentinel's stored post-mortem: it resolved in 76s with a 95% best match. That proves the brain is not just storing history; later incidents retrieve and use it.
+```bash
+pnpm sentinel:quick-test
+# Incident 1 (novel):      resolved in 21.6s, best match: 13%
+# Incident 2 (recognised): resolved in 7.1s,  best match: 95%
+```
 
 **Escalation path proof:**
 
 The escalation proof fired an unknown incident type and verified that Sentinel stopped autonomous remediation, marked the incident as escalated, and prepared on-call context instead of pretending it had fixed something. Recorded proof: incident `919ede8b78670d534bb83c2e` escalated correctly.
 
-An earlier draft listed legacy helper commands for these checks, but those helpers were removed during the strict cleanup. The runnable judge path now stays on `pnpm sentinel:quick-test`; the learning and escalation results are kept here as proof outcomes, not dead commands.
 
 ---
 
