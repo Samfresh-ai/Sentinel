@@ -49,6 +49,15 @@ Current Render deployment:
 
 The current Render service serves the web app and API from the same host. The deployment config still keeps `PUBLIC_APP_URL`, `API_PUBLIC_URL`, and `NEXT_PUBLIC_API_URL` separate so the web and API can split cleanly later.
 
+Current verified Splunk target:
+
+- Splunk Enterprise is running on AWS behind a protected gateway.
+- Render sends Sentinel logs to that AWS Splunk HEC target.
+- Splunk watches those logs with a saved search and fires Sentinel's production webhook.
+- Sentinel then acts, verifies with live SPL, closes the incident, and writes the post-mortem back to Splunk.
+
+This AWS Splunk target is cloud-side, so the proof path does not depend on the developer laptop staying on. It still depends on normal cloud operations: the EC2 host, Docker/Splunk containers, gateway, disk, AWS account, and credentials must stay healthy.
+
 ---
 
 ## What happens during an incident
@@ -260,7 +269,7 @@ Google Cloud Run deployment: `cloudbuild.sentinel.yaml`
 
 ## Verification
 
-All of the following passed on 2026-05-30 against the local Splunk Enterprise proof target:
+Latest full proof passed on 2026-05-31 against the public Render deployment and AWS-hosted Splunk Enterprise target:
 
 ```bash
 pnpm typecheck                   # zero type errors
@@ -271,7 +280,7 @@ pnpm preflight
 pnpm sentinel:quick-test         # full Splunk alert lifecycle end to end
 ```
 
-The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git. Earlier full verification also proved the learning loop and escalation path described above.
+The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git. The current proof path is: app logs -> AWS Splunk HEC -> Splunk saved search -> Render webhook -> Sentinel ACT/VERIFY/CLOSE -> post-mortem indexed back into Splunk. Earlier full verification also proved the learning loop and escalation path described above.
 
 ---
 
@@ -279,6 +288,9 @@ The latest strict proof artifact is written under `artifacts/runtime/` and is in
 
 | Component | State |
 |---|---|
+| Public Render deployment | ✅ Verified live on current commit |
+| AWS-hosted Splunk Enterprise proof target | ✅ Verified |
+| Render -> AWS Splunk -> webhook -> Sentinel autonomous flow | ✅ Verified |
 | Local Splunk Enterprise — full autonomous flow | ✅ Verified |
 | Splunk KV Store brain (incidents, runbooks, post-mortems) | ✅ Verified |
 | Live SPL log investigation during incidents | ✅ Verified |
