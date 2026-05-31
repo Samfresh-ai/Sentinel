@@ -47,7 +47,7 @@ Current Render deployment:
 - Agent OpenAPI: `https://sentinel-api-n8ly.onrender.com/agent/openapi.json`
 - Submission video: `https://youtu.be/GXZ_88BCrsI`
 
-The current Render service serves the web app and API from the same host. The deployment config still keeps `PUBLIC_APP_URL`, `API_PUBLIC_URL`, and `NEXT_PUBLIC_API_URL` separate so the web and API can split cleanly later.
+The current Render service serves the web app and API from the same host. The deployment config keeps `PUBLIC_APP_URL`, `API_PUBLIC_URL`, and `NEXT_PUBLIC_API_URL` separate so the web and API can split cleanly later.
 
 Current verified Splunk target:
 
@@ -55,9 +55,6 @@ Current verified Splunk target:
 - Render sends Sentinel logs to that AWS Splunk HEC target.
 - Splunk watches those logs with a saved search and fires Sentinel's production webhook.
 - Sentinel then acts, verifies with live SPL, closes the incident, and writes the post-mortem back to Splunk.
-
-This AWS Splunk target is cloud-side, so the proof path does not depend on the developer laptop staying on. It still depends on normal cloud operations: the EC2 host, Docker/Splunk containers, gateway, disk, AWS account, and credentials must stay healthy.
-
 ---
 
 ## What happens during an incident
@@ -129,7 +126,7 @@ The UI is not a fake demo surface. Every incident, reasoning step, audit entry, 
 ## Quick test
 
 Requirements: Docker, Node.js 20+, pnpm, a local Splunk Enterprise instance.
-See `SPLUNK_SETUP.md` for the Splunk Enterprise setup. This path exists so reviewers can test the real flow without wiring their own production app.
+See `SPLUNK_SETUP.md` for the Splunk Enterprise setup.
 
 ```bash
 git clone https://github.com/Samfresh-ai/Sentinel.git
@@ -143,7 +140,7 @@ pnpm splunk:verify         # confirms KV Store and HEC proof data
 pnpm sentinel:quick-test   # app logs -> saved search -> webhook -> ACT/VERIFY/CLOSE
 ```
 
-Open the Sentinel web URL after the script starts. A real Splunk saved search fires the webhook, Sentinel creates an incident, runs through the agent phases, verifies with SPL, closes the incident, and writes the post-mortem to Splunk. This is not a dashboard simulation button; it is the same path a production Splunk alert uses.
+Open the Sentinel web URL after the script starts. A real Splunk saved search fires the webhook, Sentinel creates an incident, runs through the agent phases, verifies with SPL, closes the incident, and writes the post-mortem to Splunk.
 
 **Learning loop proof:**
 
@@ -279,9 +276,6 @@ pnpm splunk:seed && pnpm splunk:verify
 pnpm preflight
 pnpm sentinel:quick-test         # full Splunk alert lifecycle end to end
 ```
-
-The latest strict proof artifact is written under `artifacts/runtime/` and is intentionally ignored by Git. The current proof path is: app logs -> AWS Splunk HEC -> Splunk saved search -> Render webhook -> Sentinel ACT/VERIFY/CLOSE -> post-mortem indexed back into Splunk. Earlier full verification also proved the learning loop and escalation path described above.
-
 ---
 
 ## Honest state
