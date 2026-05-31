@@ -2,10 +2,10 @@ import bcrypt from "bcryptjs";
 import { createCollection, createKvKey, getDocument, insertDocument, queryDocuments, updateDocument } from "@sentinel/splunk-brain";
 
 export const SEED_ORG_ID = process.env.SEED_ORG_ID ?? "sentinel-seed-org";
-export const SEED_ORG_NAME = process.env.SEED_ORG_NAME ?? "Sentinel Seed";
-export const SEED_ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL ?? "seed@sentinel.local").toLowerCase();
-export const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "sentinel-seed-password";
-export const SEED_WEBHOOK_SECRET = process.env.SEED_WEBHOOK_SECRET ?? "sentinel-seed-webhook-secret";
+export const SEED_ORG_NAME = process.env.SEED_ORG_NAME ?? "Sentinel Demo";
+export const SEED_ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL ?? "demo@sentinel.local").toLowerCase();
+export const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "sentinel-demo-password";
+export const SEED_WEBHOOK_SECRET = process.env.SEED_WEBHOOK_SECRET ?? "sentinel-demo-webhook-secret";
 
 export async function ensureSeedOrg(): Promise<{ orgId: string; orgName: string; adminEmail: string; webhookSecret: string }> {
   await createCollection("orgs", {});

@@ -67,6 +67,11 @@ function dependencyUnavailable(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ECONNREFUSED";
 }
 
+function healthErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 function configuredCorsOrigins(): Set<string> {
   const values = [
     process.env.PUBLIC_APP_URL,
@@ -787,11 +792,48 @@ export function createApp(): express.Express {
   app.get(
     "/health",
     asyncHandler(async (_req, res) => {
-      const brainSize = await countDocuments("incidents").catch((error: unknown) => {
-        logger.warn({ error }, "Sentinel incident count unavailable during health check");
-        return 0;
+      const issues: string[] = [];
+      const warnings: string[] = [];
+      let brainSize = 0;
+      let orgCount = 0;
+      let userCount = 0;
+      let splunkKvStore: "ok" | "unavailable" = "unavailable";
+
+      try {
+        const [incidents, orgs, users] = await Promise.all([
+          queryAllDocuments<Record<string, unknown>>("incidents", {}, 10_000),
+          queryDocuments<Record<string, unknown>>("orgs", {}, 10_000),
+          queryDocuments<Record<string, unknown>>("users", {}, 10_000)
+        ]);
+        brainSize = incidents.length;
+        orgCount = orgs.length;
+        userCount = users.length;
+        splunkKvStore = "ok";
+      } catch (error: unknown) {
+        logger.warn({ error }, "Sentinel health dependency check failed");
+        issues.push(`Splunk KV Store unavailable: ${healthErrorMessage(error)}`);
+      }
+
+      const readiness = runtimeReadiness();
+      issues.push(...readiness.violations);
+      if (splunkKvStore === "ok" && (orgCount === 0 || userCount === 0)) {
+        issues.push("No Sentinel auth org/user is seeded; login cannot succeed");
+      }
+      if (splunkKvStore === "ok" && brainSize === 0) {
+        warnings.push("No incidents are seeded yet; dashboard and brain views will be empty until Splunk sends alerts or seed data is loaded");
+      }
+
+      res.json({
+        status: issues.length > 0 ? "degraded" : "ok",
+        brainSize,
+        authReady: orgCount > 0 && userCount > 0,
+        orgCount,
+        userCount,
+        splunkKvStore,
+        runtime: readiness,
+        issues,
+        warnings
       });
-      res.json({ status: "ok", brainSize });
     })
   );
 
