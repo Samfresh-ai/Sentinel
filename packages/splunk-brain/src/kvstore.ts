@@ -76,7 +76,7 @@ export function createKvKey(): string {
 export async function createCollection(name: string, fields: Record<string, string> = {}): Promise<void> {
   const current = await splunkRestRequest(collectionListSchema, {
     path: configPath(),
-    query: { output_mode: "json" }
+    query: { output_mode: "json", count: 0 }
   }).catch(() => ({ entry: [] }));
   if ((current.entry ?? []).some((entry) => entry.name === name)) return;
 
@@ -88,6 +88,10 @@ export async function createCollection(name: string, fields: Record<string, stri
       output_mode: "json",
       ...Object.fromEntries(Object.entries(fields).map(([field, type]) => [`field.${field}`, type]))
     }
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("409") && message.includes("already exists")) return {};
+    throw error;
   });
 }
 
