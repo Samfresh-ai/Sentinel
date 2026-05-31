@@ -1,4 +1,5 @@
 # Sentinel — Architecture
+<img width="1440" height="836" alt="image" src="https://github.com/user-attachments/assets/24b02597-7307-44f3-8ff9-15cd15690cc9" />
 
 Autonomous incident response agent built on Splunk. This document shows the full data flow from application logs through Splunk detection to autonomous agent resolution.
 
