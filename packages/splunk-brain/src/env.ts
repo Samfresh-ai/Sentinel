@@ -3,6 +3,14 @@ import { z } from "zod";
 
 loadRootEnv();
 
+const booleanEnv = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase();
+  if (["false", "0", "no"].includes(normalized)) return false;
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  return value;
+}, z.boolean());
+
 const splunkEnvSchema = z.object({
   SPLUNK_HOST: z.string().min(1).default("localhost"),
   SPLUNK_CLOUD_STACK_HOST: z.string().min(1).optional(),
@@ -11,6 +19,7 @@ const splunkEnvSchema = z.object({
   SPLUNK_MGMT_PORT: z.coerce.number().int().positive().default(8089),
   SPLUNK_HEC_PORT: z.coerce.number().int().positive().default(8088),
   SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
+  SPLUNK_TLS_REJECT_UNAUTHORIZED: booleanEnv.default(true),
   SPLUNK_CA_CERT: z.string().min(1).optional(),
   SPLUNK_USERNAME: z.string().min(1),
   SPLUNK_PASSWORD: z.string().min(1),

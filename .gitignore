@@ -3,6 +3,7 @@ dist
 .next
 .turbo
 .env
+.env.aws
 .env.local
 .serena
 coverage

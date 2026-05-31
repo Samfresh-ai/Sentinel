@@ -7,7 +7,8 @@ import {
   insertDocument,
   runSearch,
   sendEvent,
-  splunkRestRequest
+  splunkRestRequest,
+  waitForSplunkReady
 } from "@sentinel/splunk-brain";
 
 const DEFAULT_API_URL = "https://sentinel-api-n8ly.onrender.com";
@@ -52,7 +53,7 @@ function writeLine(line: string): void {
 }
 
 function apiBaseUrl(): string {
-  return (process.env.SENTINEL_API_URL ?? process.env.API_PUBLIC_URL ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, "");
+  return (process.env.SENTINEL_API_URL ?? process.env.API_PUBLIC_URL ?? process.env.AGENT_TOOL_EXECUTION_BASE_URL ?? DEFAULT_API_URL).replace(/\/+$/, "");
 }
 
 function runId(): string {
@@ -220,6 +221,14 @@ async function savedSearchExists(name: string): Promise<boolean> {
   return (response?.entry?.length ?? 0) > 0;
 }
 
+async function getSavedSearch(name: string): Promise<Record<string, unknown> | null> {
+  const response = await splunkRestRequest(savedSearchSchema, {
+    path: `/servicesNS/admin/sentinel/saved/searches/${encodeURIComponent(name)}`,
+    query: { output_mode: "json" }
+  }).catch(() => null);
+  return response?.entry?.[0]?.content ?? null;
+}
+
 async function configureSavedSearch(input: { name: string; search: string; webhookUrl: string }): Promise<void> {
   const exists = await savedSearchExists(input.name);
   await splunkRestRequest(z.record(z.unknown()).default({}), {
@@ -228,6 +237,15 @@ async function configureSavedSearch(input: { name: string; search: string; webho
     query: { output_mode: "json" },
     form: savedSearchForm({ ...input, includeName: !exists })
   });
+  const content = await getSavedSearch(input.name);
+  const disabled = String(content?.disabled ?? "1");
+  const configuredWebhook = String(content?.["action.webhook.param.url"] ?? "");
+  if (disabled !== "0" && disabled !== "false") {
+    throw new Error(`Splunk saved search ${input.name} is not enabled`);
+  }
+  if (configuredWebhook !== input.webhookUrl) {
+    throw new Error(`Splunk saved search ${input.name} webhook URL was not stored correctly`);
+  }
 }
 
 async function disableSavedSearch(name: string): Promise<void> {
@@ -247,6 +265,13 @@ async function sendProjectLogs(projectId: string): Promise<number> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const events = Array.from({ length: 86 }, (_item, index) => {
     const failure = index < 36;
+    const failureVariant = index % 3;
+    const failureMessage =
+      failureVariant === 0
+        ? "checkout failed after payment authorization: Redis read ECONNRESET, pool waiters rising, idempotency lock not released"
+        : failureVariant === 1
+          ? "checkout retry storm: upstream Redis socket reset during capture, fallback cache miss, provider callback delayed"
+          : "checkout hard failure: cart reservation timed out after Redis MOVED redirect and ECONNRESET on reused TLS socket";
     return {
       index: "prod",
       sourcetype: "app",
@@ -258,9 +283,28 @@ async function sendProjectLogs(projectId: string): Promise<number> {
         level: failure ? "error" : "info",
         service: "payment",
         error_type: failure ? "ECONNRESET" : "OK",
+        route: "/checkout/confirm",
+        region: index % 2 === 0 ? "iad" : "atl",
+        deploy_sha: "sentinel-human-flow-hard-log",
+        trace_id: `${projectId}-trace-${Math.floor(index / 4)}`,
+        span_id: `${projectId}-span-${index}`,
+        latency_ms: failure ? 4200 + index * 31 : 120 + index,
+        retry_attempt: failure ? (index % 4) + 1 : 0,
+        redis_pool_active: failure ? 128 : 19 + (index % 5),
+        redis_pool_waiting: failure ? 45 + index : index % 2,
+        provider_status: failure ? "capture_pending" : "captured",
+        root_signal: failure ? "redis_pool_exhaustion_after_econnreset" : "healthy_checkout",
         message: failure
-          ? "checkout failed: Redis ECONNRESET and connection pool exhausted"
+          ? failureMessage
           : "checkout completed",
+        error_stack: failure
+          ? [
+              "Error: read ECONNRESET",
+              "    at RedisSocket.onStreamRead (node:internal/stream_base_commons:217:20)",
+              "    at PaymentCapture.confirm (/srv/app/src/checkout/payment-capture.ts:184:17)",
+              "    at async CheckoutController.confirm (/srv/app/src/checkout/controller.ts:77:9)"
+            ].join("\\n")
+          : null,
         requestId: `${projectId}-${index}`
       }
     };
@@ -351,6 +395,13 @@ async function main(): Promise<void> {
   try {
     writeLine(`CHECK api=${apiUrl}`);
     await requestJson(`${apiUrl}/health`);
+    await waitForSplunkReady({
+      onRetry: (attempt, message) => {
+        if (attempt % 6 === 0) writeLine(`WAIT splunk-ready attempt=${attempt} last=${message}`);
+      }
+    });
+    writeLine("PASSED splunk-ready - management API is reachable");
+
     const org = await createHumanOrg(apiUrl, id);
     proof.appProject = {
       orgId: org.orgId,
@@ -361,8 +412,9 @@ async function main(): Promise<void> {
     proof.webhookUrl = redactWebhook(org.webhookUrl);
 
     await seedHumanProject({ orgId: org.orgId, apiUrl });
-    const search = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" service=payment error_type=ECONNRESET | stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype by sentinelProjectId | where error_count >= 30 | eval service="payment-service", severity="P1"`;
+    const search = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" service=payment error_type=ECONNRESET | stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype values(message) as _raw values(root_signal) as root_signal max(redis_pool_waiting) as redis_pool_waiting max(latency_ms) as latency_ms by sentinelProjectId | where error_count >= 30 | eval service="payment-service", severity="P1"`;
     await configureSavedSearch({ name: savedSearchName, search, webhookUrl: org.webhookUrl });
+    writeLine(`PASS Splunk saved search configured name=${savedSearchName}`);
     proof.savedSearch = {
       search,
       schedule: CRON_SCHEDULE,

@@ -26,6 +26,12 @@ function jwtSecret(): string {
   return secret;
 }
 
+function unauthorizedError(): Error {
+  const error = new Error("Unauthorized");
+  error.name = "Unauthorized";
+  return error;
+}
+
 function apiBaseUrl(req: Request): string {
   const configured = process.env.API_PUBLIC_URL ?? process.env.AGENT_TOOL_EXECUTION_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (configured && configured.trim().length > 0) return configured.replace(/\/+$/, "");
@@ -49,18 +55,14 @@ function bearerToken(req: Request): string | null {
 export function verifyAuth(req: Request): AuthenticatedOrg {
   const token = bearerToken(req);
   if (!token) {
-    const error = new Error("Unauthorized");
-    error.name = "Unauthorized";
-    throw error;
+    throw unauthorizedError();
   }
   try {
     const decoded = jwt.verify(token, jwtSecret()) as Partial<AuthenticatedOrg>;
     if (!decoded.orgId || !decoded.userId || !decoded.orgName) throw new Error("Invalid JWT payload");
     return { orgId: decoded.orgId, userId: decoded.userId, orgName: decoded.orgName };
   } catch {
-    const error = new Error("Unauthorized");
-    error.name = "Unauthorized";
-    throw error;
+    throw unauthorizedError();
   }
 }
 
@@ -108,11 +110,21 @@ export async function verifyWebhookOrg(orgId: string, secret: string): Promise<{
   const org = await getDocument<Record<string, unknown>>("orgs", orgId);
   const hash = typeof org?.webhookSecretHash === "string" ? org.webhookSecretHash : "";
   if (!org || !hash || !(await bcrypt.compare(secret, hash))) {
-    const error = new Error("Unauthorized");
-    error.name = "Unauthorized";
-    throw error;
+    throw unauthorizedError();
   }
   return { orgId, orgName: typeof org.orgName === "string" ? org.orgName : orgId };
+}
+
+async function getSessionRecords(auth: AuthenticatedOrg): Promise<{ org: Record<string, unknown>; user: Record<string, unknown> }> {
+  await ensureAuthCollections();
+  const [org, user] = await Promise.all([
+    getDocument<Record<string, unknown>>("orgs", auth.orgId),
+    getDocument<Record<string, unknown>>("users", auth.userId)
+  ]);
+  if (!org || !user || user.orgId !== auth.orgId) {
+    throw unauthorizedError();
+  }
+  return { org, user };
 }
 
 export function authRouter(): Router {
@@ -182,6 +194,9 @@ export function authRouter(): Router {
       }
       const orgId = typeof user.orgId === "string" ? user.orgId : "";
       const org = await getDocument<Record<string, unknown>>("orgs", orgId);
+      if (!org) {
+        throw unauthorizedError();
+      }
       const orgName = typeof org?.orgName === "string" ? org.orgName : typeof user.orgName === "string" ? user.orgName : orgId;
       res.json({ token: signToken({ orgId, userId: String(user._key), orgName }), orgId, orgName });
     } catch (error) {
@@ -192,11 +207,11 @@ export function authRouter(): Router {
   router.get("/me", requireAuth, async (req: AuthenticatedRequest, res, next) => {
     try {
       const auth = req.auth!;
-      const org = await getDocument<Record<string, unknown>>("orgs", auth.orgId).catch(() => null);
+      const { org } = await getSessionRecords(auth);
       const brainSize = await countDocuments("incidents", {}, { orgId: auth.orgId }).catch(() => 0);
       res.json({
         orgId: auth.orgId,
-        orgName: auth.orgName,
+        orgName: typeof org.orgName === "string" ? org.orgName : auth.orgName,
         adminEmail: typeof org?.adminEmail === "string" ? org.adminEmail : "",
         brainSize,
         webhookUrl: `${apiBaseUrl(req)}/webhooks/splunk-alert?orgId=${encodeURIComponent(auth.orgId)}&secret=<shown-once-at-signup>`
@@ -209,6 +224,7 @@ export function authRouter(): Router {
   router.post("/webhook-secret/rotate", requireAuth, async (req: AuthenticatedRequest, res, next) => {
     try {
       const auth = req.auth!;
+      await getSessionRecords(auth);
       const webhookSecret = crypto.randomBytes(32).toString("hex");
       const rotatedAt = new Date().toISOString();
       await updateDocument("orgs", auth.orgId, {

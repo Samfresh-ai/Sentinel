@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { countDocuments, runSearch } from "@sentinel/splunk-brain";
+import { countDocuments, runSearch, waitForSplunkReady } from "@sentinel/splunk-brain";
 import { incidents, patterns, runbooks } from "./seed-data.js";
 import { ensureSeedOrg } from "./test-org.js";
 
@@ -12,6 +12,13 @@ function scopedKey(orgId: string, key: string): string {
 }
 
 async function main(): Promise<void> {
+  await waitForSplunkReady({
+    onRetry: (attempt, message) => {
+      if (attempt % 6 === 0) writeLine(`WAIT splunk-ready attempt=${attempt} last=${message}`);
+    }
+  });
+  writeLine("PASSED splunk-ready - management API is reachable");
+
   const org = await ensureSeedOrg();
   const serviceNames = ["payment-service", "auth-service", "notification-service", "redis-cache", "postgres-main"];
   const expected = [

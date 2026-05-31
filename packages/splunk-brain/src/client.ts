@@ -8,8 +8,17 @@ import { getSplunkEnv, type SplunkEnv } from "./env.js";
 
 const logger = createLogger("sentinel-splunk-client");
 let warnedSelfSigned = false;
+let warnedTlsDisabled = false;
 
 export type SplunkConfig = SplunkEnv;
+
+const booleanEnv = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim().toLowerCase();
+  if (["false", "0", "no"].includes(normalized)) return false;
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  return value;
+}, z.boolean());
 
 export const SplunkConfigSchema = z.object({
   SPLUNK_HOST: z.string().default("localhost"),
@@ -19,6 +28,7 @@ export const SplunkConfigSchema = z.object({
   SPLUNK_MGMT_PORT: z.number().default(8089),
   SPLUNK_HEC_PORT: z.number().default(8088),
   SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
+  SPLUNK_TLS_REJECT_UNAUTHORIZED: booleanEnv.default(true),
   SPLUNK_CA_CERT: z.string().optional(),
   SPLUNK_USERNAME: z.string(),
   SPLUNK_PASSWORD: z.string(),
@@ -67,6 +77,23 @@ function cloudStackHost(config: SplunkConfig): string | undefined {
 
 function shouldAllowSelfSigned(endpoint: { host: string }): boolean {
   return isLocalHost(endpoint.host);
+}
+
+function shouldRejectUnauthorized(config: SplunkConfig, endpoint: { host: string }): boolean {
+  if (shouldAllowSelfSigned(endpoint)) return false;
+  return config.SPLUNK_TLS_REJECT_UNAUTHORIZED;
+}
+
+function warnTlsChoice(config: SplunkConfig, endpoint: { host: string }): void {
+  if (shouldAllowSelfSigned(endpoint) && !warnedSelfSigned) {
+    logger.warn({ host: endpoint.host }, "Splunk local self-signed certificate validation is disabled for localhost only");
+    warnedSelfSigned = true;
+    return;
+  }
+  if (!config.SPLUNK_TLS_REJECT_UNAUTHORIZED && !warnedTlsDisabled) {
+    logger.warn({ host: endpoint.host }, "Splunk TLS certificate validation is disabled by SPLUNK_TLS_REJECT_UNAUTHORIZED=false");
+    warnedTlsDisabled = true;
+  }
 }
 
 function customCertificateAuthorities(config: SplunkConfig): string[] | undefined {
@@ -158,6 +185,23 @@ function pathWithParams(path: string, query?: Record<string, string | number | b
   return queryString.length > 0 ? `${path}?${queryString}` : path;
 }
 
+function hecCollectorEventPath(endpoint: { basePath: string }): string {
+  const basePath = endpoint.basePath.replace(/\/+$/, "");
+  if (basePath.endsWith("/services/collector/event")) return basePath;
+  if (basePath.endsWith("/services/collector")) return `${basePath}/event`;
+  return `${basePath}/services/collector/event`;
+}
+
+function endpointUrl(endpoint: {
+  protocol: "http:" | "https:";
+  host: string;
+  port?: number;
+  basePath: string;
+}, path = endpoint.basePath): string {
+  const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
+  return `${endpoint.protocol}//${endpoint.host}${port}${path}`;
+}
+
 function formBody(form: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(form)) {
@@ -238,18 +282,15 @@ export async function splunkRestRequest<T>(
 ): Promise<T> {
   const config = getSplunkConfig();
   const endpoint = managementEndpoint(config);
-  const allowSelfSigned = shouldAllowSelfSigned(endpoint);
+  const rejectUnauthorized = shouldRejectUnauthorized(config, endpoint);
   const ca = customCertificateAuthorities(config);
-  if (allowSelfSigned && !warnedSelfSigned) {
-    logger.warn({ host: endpoint.host }, "Splunk local self-signed certificate validation is disabled for localhost only");
-    warnedSelfSigned = true;
-  }
+  warnTlsChoice(config, endpoint);
   const body = input.json !== undefined ? JSON.stringify(input.json) : input.form ? formBody(input.form) : undefined;
   const requestInput = {
     ...requestEndpoint(endpoint),
     method: input.method ?? "GET",
     path: `${endpoint.basePath}${pathWithParams(input.path, input.query)}`,
-    rejectUnauthorized: !allowSelfSigned,
+    rejectUnauthorized,
     ...(ca ? { ca } : {}),
     ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
@@ -270,14 +311,15 @@ export async function splunkRestRequest<T>(
 export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown): Promise<T> {
   const config = getSplunkConfig();
   const endpoint = hecEndpoint(config);
-  const allowSelfSigned = shouldAllowSelfSigned(endpoint);
+  const rejectUnauthorized = shouldRejectUnauthorized(config, endpoint);
   const ca = customCertificateAuthorities(config);
+  warnTlsChoice(config, endpoint);
   const text = await requestRaw({
     ...requestEndpoint(endpoint),
     method: "POST",
-    path: `${endpoint.basePath}/services/collector/event`,
+    path: hecCollectorEventPath(endpoint),
     body: JSON.stringify(payload),
-    rejectUnauthorized: !allowSelfSigned,
+    rejectUnauthorized,
     ...(ca ? { ca } : {}),
     ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
@@ -287,6 +329,69 @@ export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown
     }
   });
   return schema.parse(parseJson(text));
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function readyTimeoutMs(): number {
+  const raw = Number.parseInt(process.env.SPLUNK_READY_TIMEOUT_MS ?? "300000", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 300000;
+}
+
+function retryIntervalMs(): number {
+  const raw = Number.parseInt(process.env.SPLUNK_READY_RETRY_MS ?? "5000", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5000;
+}
+
+function isNonRetryableReadyError(message: string): boolean {
+  return / failed with (401|403|404):/.test(message);
+}
+
+export async function waitForSplunkReady(input: {
+  timeoutMs?: number;
+  retryMs?: number;
+  onRetry?: (attempt: number, message: string) => void;
+} = {}): Promise<void> {
+  const timeoutMs = input.timeoutMs ?? readyTimeoutMs();
+  const retryMs = input.retryMs ?? retryIntervalMs();
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  let lastMessage = "Splunk management API did not respond";
+
+  while (Date.now() <= deadline) {
+    attempt += 1;
+    try {
+      await splunkRestRequest(z.record(z.unknown()), {
+        path: "/services/server/info",
+        query: { output_mode: "json" }
+      });
+      return;
+    } catch (error: unknown) {
+      lastMessage = error instanceof Error ? error.message : String(error);
+      if (isNonRetryableReadyError(lastMessage)) {
+        throw new Error(`Splunk management API is reachable but not usable: ${lastMessage}`);
+      }
+      if (Date.now() + retryMs > deadline) break;
+      input.onRetry?.(attempt, lastMessage);
+      await delay(retryMs);
+    }
+  }
+
+  throw new Error(`Splunk management API was not ready after ${timeoutMs}ms: ${lastMessage}`);
+}
+
+export function describeSplunkEndpoints(): { managementUrl: string; hecUrl: string } {
+  const config = getSplunkConfig();
+  const management = managementEndpoint(config);
+  const hec = hecEndpoint(config);
+  return {
+    managementUrl: endpointUrl(management),
+    hecUrl: endpointUrl(hec, hecCollectorEventPath(hec))
+  };
 }
 
 export const emptyResponseSchema = z.record(z.unknown()).default({});

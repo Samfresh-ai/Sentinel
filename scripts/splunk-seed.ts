@@ -3,7 +3,8 @@ import {
   batchInsert,
   clearCollection,
   createCollection,
-  sendEvent
+  sendEvent,
+  waitForSplunkReady
 } from "@sentinel/splunk-brain";
 import { incidents, patterns, runbooks } from "./seed-data.js";
 import { ensureSeedOrg } from "./test-org.js";
@@ -138,6 +139,13 @@ async function recreateCollections(orgId: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await waitForSplunkReady({
+    onRetry: (attempt, message) => {
+      if (attempt % 6 === 0) writeLine(`WAIT splunk-ready attempt=${attempt} last=${message}`);
+    }
+  });
+  writeLine("PASSED splunk-ready - management API is reachable");
+
   const org = await ensureSeedOrg();
   await recreateCollections(org.orgId);
   const runbookKey = (incidentType: string) => scopedKey(org.orgId, incidentType);

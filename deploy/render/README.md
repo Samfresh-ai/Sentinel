@@ -39,14 +39,14 @@ GET https://<sentinel-api-url>/health
 GET https://<sentinel-live-url>/
 ```
 
-## Splunk Enterprise Local Test Target
+## Splunk Enterprise AWS Gateway Target
 
-For local Enterprise testing through the protected tunnel:
+For the verified AWS-hosted Splunk Enterprise gateway:
 
 ```text
-SPLUNK_HOST=splunk.paysmat.xyz
-SPLUNK_MGMT_URL=https://splunk.paysmat.xyz
-SPLUNK_HEC_URL=https://splunk.paysmat.xyz
+SPLUNK_HOST=sentinel-gw.3.208.71.125.sslip.io
+SPLUNK_MGMT_URL=https://sentinel-gw.3.208.71.125.sslip.io
+SPLUNK_HEC_URL=https://sentinel-gw.3.208.71.125.sslip.io
 SPLUNK_MGMT_PORT=8089
 SPLUNK_HEC_PORT=8088
 SPLUNK_HEC_PROTOCOL=https
@@ -58,7 +58,7 @@ SPLUNK_CF_ACCESS_CLIENT_ID=
 SPLUNK_CF_ACCESS_CLIENT_SECRET=
 ```
 
-This is acceptable for local proof only while the tunnel and Splunk process are supervised.
+Do not use `splunk.paysmat.xyz` for this proof path; that route currently returns Cloudflare 530.
 
 ## Splunk Cloud Cutover
 

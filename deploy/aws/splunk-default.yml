@@ -1,0 +1,34 @@
+---
+splunk:
+  hec:
+    enable: true
+    ssl: false
+    port: 8088
+  conf:
+    - key: app
+      value:
+        directory: /opt/splunk/etc/apps/sentinel/local
+        content:
+          install:
+            is_configured: 1
+          ui:
+            is_visible: 1
+            label: Sentinel
+          launcher:
+            author: Sentinel
+            description: Sentinel Enterprise app configuration.
+            version: 1.0.0
+    - key: indexes
+      value:
+        directory: /opt/splunk/etc/system/local
+        content:
+          sentinel:
+            homePath: $SPLUNK_DB/sentinel/db
+            coldPath: $SPLUNK_DB/sentinel/colddb
+            thawedPath: $SPLUNK_DB/sentinel/thaweddb
+            datatype: event
+          prod:
+            homePath: $SPLUNK_DB/prod/db
+            coldPath: $SPLUNK_DB/prod/colddb
+            thawedPath: $SPLUNK_DB/prod/thaweddb
+            datatype: event
