@@ -11,6 +11,10 @@ COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
+ARG NEXT_PUBLIC_API_URL=
+ARG NEXT_PUBLIC_QDRANT_DASHBOARD_URL=
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_QDRANT_DASHBOARD_URL=${NEXT_PUBLIC_QDRANT_DASHBOARD_URL}
 COPY apps/web apps/web
 RUN pnpm --filter @sentinel/web build
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { splunkKvQuery } from "@sentinel/splunk-mcp";
+import { qdrantMemoryQuery } from "@sentinel/splunk-mcp";
 import { getServiceDependencyGraphSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
 
@@ -42,23 +42,23 @@ export async function sentinelGetServiceDependencyGraph(input: unknown): Promise
   const parsed = sentinelGetServiceDependencyGraphInputSchema.parse(input);
   invocationStarted("get_service_dependency_graph", parsed);
   try {
-    const rootDoc = (await splunkKvQuery("services", { name: parsed.serviceName }, 1, parsed.orgId))[0];
+    const rootDoc = (await qdrantMemoryQuery("services", { name: parsed.serviceName }, 1, parsed.orgId))[0];
     if (!rootDoc) {
       invocationFinished("get_service_dependency_graph", null);
       return null;
     }
     const root = mapService(rootDoc);
     const dependencyDocs = root.dependencies.length
-      ? await splunkKvQuery("services", { name: { $in: root.dependencies } }, root.dependencies.length, parsed.orgId)
+      ? await qdrantMemoryQuery("services", { name: { $in: root.dependencies } }, root.dependencies.length, parsed.orgId)
       : [];
     const dependentNames = new Set(root.dependents);
-    const discoveredDependentDocs = await splunkKvQuery("services", { dependencies: parsed.serviceName }, 25, parsed.orgId);
+    const discoveredDependentDocs = await qdrantMemoryQuery("services", { dependencies: parsed.serviceName }, 25, parsed.orgId);
     for (const doc of discoveredDependentDocs) {
       const name = asString(doc.name);
       if (name.length > 0) dependentNames.add(name);
     }
     const dependentDocs = dependentNames.size
-      ? await splunkKvQuery("services", { name: { $in: [...dependentNames] } }, dependentNames.size, parsed.orgId)
+      ? await qdrantMemoryQuery("services", { name: { $in: [...dependentNames] } }, dependentNames.size, parsed.orgId)
       : [];
     const graph = {
       service: root,
@@ -75,6 +75,6 @@ export async function sentinelGetServiceDependencyGraph(input: unknown): Promise
 
 export const sentinelGetServiceDependencyGraphDefinition: AgentToolDefinition = {
   name: "get_service_dependency_graph",
-  description: "Return one-level dependency and dependent graph for an affected service from Splunk KV Store.",
+  description: "Return one-level dependency and dependent graph for an affected service from Qdrant service context.",
   inputSchema: getServiceDependencyGraphSchema
 };

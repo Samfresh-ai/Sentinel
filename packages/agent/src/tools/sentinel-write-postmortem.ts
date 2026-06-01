@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { splunkHecSend, splunkKvGet, splunkKvPut } from "@sentinel/splunk-mcp";
+import { qdrantMemoryGet, qdrantMemoryPut, qdrantMemorySend } from "@sentinel/splunk-mcp";
 import { generatePostmortemFields } from "../gemini.js";
 import { writePostmortemSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
@@ -17,7 +17,7 @@ export const sentinelWritePostmortemInputSchema = z.object({
     z.object({
       timestamp: z.string().datetime(),
       event: z.string().min(1),
-      actor: z.enum(["sentinel", "human"])
+      actor: z.enum(["operaiq", "sentinel", "human"])
     })
   ).min(1),
   rootCause: z.string().min(5),
@@ -38,9 +38,9 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
   const parsed = sentinelWritePostmortemInputSchema.parse(input);
   invocationStarted("write_postmortem", parsed);
   try {
-    const incident = await splunkKvGet("incidents", parsed.incidentId, parsed.orgId);
+    const incident = await qdrantMemoryGet("incidents", parsed.incidentId, parsed.orgId);
     if (!incident) {
-      throw new Error(`Sentinel incident ${parsed.incidentId} does not exist`);
+      throw new Error(`OperaIQ incident ${parsed.incidentId} does not exist`);
     }
     const generated = await generatePostmortemFields({
       title: asString(incident.title),
@@ -51,7 +51,7 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
     });
     const createdAt = new Date();
     const duration = durationMinutes(incident, createdAt);
-    const inserted = await splunkKvPut("postmortems", null, {
+    const inserted = await qdrantMemoryPut("postmortems", null, {
       orgId: parsed.orgId,
       incidentId: parsed.incidentId,
       title: `Post-mortem: ${asString(incident.title)}`,
@@ -62,12 +62,12 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
       remediationTaken: parsed.remediationTaken,
       preventionActions: generated.preventionActions,
       lessonLearned: parsed.lessonLearned,
-      generatedBy: "sentinel",
+      generatedBy: "operaiq",
       createdAt: createdAt.toISOString()
     }, parsed.orgId);
 
     const resolution = parsed.remediationTaken.join(" -> ");
-    await splunkKvPut("incidents", parsed.incidentId, {
+    await qdrantMemoryPut("incidents", parsed.incidentId, {
       ...incident,
       status: "resolved",
       resolvedAt: createdAt.toISOString(),
@@ -79,8 +79,8 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
       updatedAt: createdAt.toISOString()
     }, parsed.orgId);
 
-    await splunkHecSend({
-      sourcetype: "sentinel:postmortem",
+    await qdrantMemorySend({
+      sourcetype: "operaiq:postmortem",
       event: {
         type: "postmortem",
         orgId: parsed.orgId,
@@ -93,7 +93,7 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
         remediationSteps: parsed.remediationTaken,
         durationMinutes: duration,
         preventionActions: generated.preventionActions,
-        generatedBy: "sentinel",
+        generatedBy: "operaiq",
         createdAt: createdAt.toISOString()
       }
     });
@@ -113,6 +113,6 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
 
 export const sentinelWritePostmortemDefinition: AgentToolDefinition = {
   name: "write_postmortem",
-  description: "Generate a structured Sentinel post-mortem, update Splunk KV Store, and index it through HEC.",
+  description: "Generate a structured OperaIQ post-mortem and write it to Qdrant memory.",
   inputSchema: writePostmortemSchema
 };

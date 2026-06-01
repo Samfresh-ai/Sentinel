@@ -1,7 +1,7 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-export const SPLUNK_DASHBOARD_URL = process.env.NEXT_PUBLIC_SPLUNK_DASHBOARD_URL ?? "http://localhost:8000/en-US/app/sentinel/sentinel_overview";
-export const TOKEN_STORAGE_KEY = "sentinel_token";
-export const AUTH_CHANGED_EVENT = "sentinel-auth-changed";
+export const QDRANT_DASHBOARD_URL = process.env.NEXT_PUBLIC_QDRANT_DASHBOARD_URL ?? "http://localhost:6333/dashboard";
+export const TOKEN_STORAGE_KEY = "operaiq_token";
+export const AUTH_CHANGED_EVENT = "operaiq-auth-changed";
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export class ApiRequestError extends Error {
@@ -9,7 +9,7 @@ export class ApiRequestError extends Error {
   body: string;
 
   constructor(status: number, body: string) {
-    super(body || (status === 0 ? "Sentinel API request timed out" : `Request failed with ${status}`));
+    super(body || (status === 0 ? "OperaIQ API request timed out" : `Request failed with ${status}`));
     this.name = "ApiRequestError";
     this.status = status;
     this.body = body;
@@ -37,7 +37,7 @@ export interface Incident {
   verifyResults: Array<{ timestamp: string; errorCount: number; passed: boolean }>;
   severityUpgradedFrom: string | null;
   severityUpgradeReason: string | null;
-  correlationReport: Array<{ service: string; errorCount: number; dominantErrorType: string | null; status: "anomalous" | "elevated" | "clean"; spl: string }>;
+  correlationReport: Array<{ service: string; errorCount: number; dominantErrorType: string | null; status: "anomalous" | "elevated" | "clean"; query: string }>;
   rootCauseCandidate: string | null;
   bestSimilarityScore: number | null;
 }
@@ -70,7 +70,7 @@ export interface Postmortem {
   incidentId: string;
   title: string;
   summary: string;
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "sentinel" | "human" }>;
   rootCause: string;
   contributingFactors: string[];
   remediationTaken: string[];
@@ -123,7 +123,7 @@ export interface WebhookSecretRotation {
   rotatedAt: string;
 }
 
-export interface SplunkOverview {
+export interface QdrantOverview {
   nativeDashboardUrl: string;
   activeIncidents: number;
   brainSize: number;
@@ -138,6 +138,54 @@ export interface SplunkOverview {
     incidentId: string;
   }>;
   serviceHealth: Array<{ service: string; eventCount: number; errorCount: number; errorRate: number }>;
+}
+
+export interface Project {
+  _key: string;
+  orgId: string;
+  name: string;
+  service: string;
+  environment: string;
+  ingestUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectLogInput {
+  level: "debug" | "info" | "warn" | "error" | "fatal";
+  service: string;
+  message: string;
+  stack?: string;
+  errorName?: string;
+  traceId?: string;
+  requestId?: string;
+  route?: string;
+  statusCode?: number;
+  latencyMs?: number;
+  timestamp?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface ProjectFlow {
+  project: Project;
+  counts: {
+    logsStored: number;
+    patternAlerts: number;
+    auditEntries: number;
+    postmortems: number;
+  };
+  latestPatternAlert: Record<string, unknown> | null;
+  incident: Incident | null;
+  postmortem: Postmortem | null;
+  audit: AuditEntry[];
+  stages: {
+    appLogsStored: boolean;
+    qdrantPatternMatched: boolean;
+    webhookFired: boolean;
+    operaiqActed: boolean;
+    operaiqVerified: boolean;
+    qdrantPostmortemStored: boolean;
+  };
 }
 
 function emitAuthChanged(): void {
@@ -184,7 +232,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new ApiRequestError(0, `Sentinel API did not answer within ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiRequestError(0, `OperaIQ API did not answer within ${REQUEST_TIMEOUT_MS / 1000}s`);
     }
     throw error;
   } finally {
@@ -206,7 +254,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       : `${contentType || "a non-JSON response"}${bodyPreview ? `: ${bodyPreview}` : ""}`;
     throw new ApiRequestError(
       response.status,
-      `Sentinel API returned ${detail} for ${path}`
+      `OperaIQ API returned ${detail} for ${path}`
     );
   }
   return (await response.json()) as T;
@@ -271,8 +319,23 @@ export async function fetchRuntimeReadiness(): Promise<RuntimeReadiness> {
   return requestJson<RuntimeReadiness>("/runtime/readiness");
 }
 
-export async function fetchSplunkOverview(): Promise<SplunkOverview> {
-  return requestJson<SplunkOverview>("/splunk/overview");
+export async function fetchQdrantOverview(): Promise<QdrantOverview> {
+  return requestJson<QdrantOverview>("/qdrant/overview");
+}
+
+export async function createProject(input: { name: string; service?: string; environment?: string }): Promise<{ project: Project }> {
+  return requestJson<{ project: Project }>("/projects", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function ingestProjectLogs(projectId: string, logs: ProjectLogInput[]): Promise<{ accepted: number; eventIds: string[]; projectId: string; batchId: string; qdrant: string }> {
+  return requestJson<{ accepted: number; eventIds: string[]; projectId: string; batchId: string; qdrant: string }>(`/projects/${projectId}/logs`, {
+    method: "POST",
+    body: JSON.stringify({ logs })
+  });
+}
+
+export async function fetchProjectFlow(projectId: string): Promise<ProjectFlow> {
+  return requestJson<ProjectFlow>(`/projects/${projectId}/flow`);
 }
 
 export function apiUrl(path: string): string {

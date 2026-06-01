@@ -47,7 +47,7 @@ function routeToWeb(req) {
   const acceptsHtml = String(req.headers.accept ?? "").includes("text/html");
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/" || pathname === "/setup") return true;
-  if (pathname === "/brain" || pathname === "/services" || pathname === "/splunk") return acceptsHtml;
+  if (pathname === "/brain" || pathname === "/services" || pathname === "/qdrant" || pathname === "/test-app") return acceptsHtml;
   if (pathname === "/incidents" || pathname.startsWith("/incidents/")) {
     return acceptsHtml;
   }

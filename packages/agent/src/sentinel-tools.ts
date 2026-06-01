@@ -1,6 +1,6 @@
 import {
   executeRemediationDefinition,
-  querySplunkLogsDefinition,
+  queryQdrantMemoryDefinition,
   sentinelGetRunbookDefinition,
   sentinelGetServiceDependencyGraphDefinition,
   sentinelSearchSimilarIncidentsDefinition,
@@ -10,7 +10,7 @@ import type { AgentToolDefinition } from "./tool-json-schemas.js";
 
 export const sentinelToolDefinitions: AgentToolDefinition[] = [
   sentinelSearchSimilarIncidentsDefinition,
-  querySplunkLogsDefinition,
+  queryQdrantMemoryDefinition,
   sentinelGetServiceDependencyGraphDefinition,
   sentinelGetRunbookDefinition,
   executeRemediationDefinition,

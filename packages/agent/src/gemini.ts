@@ -180,14 +180,14 @@ async function generateJsonText(prompt: string): Promise<string> {
 
 export async function generatePostmortemFields(input: {
   title: string;
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "sentinel" | "human" }>;
   rootCause: string;
   remediationTaken: string[];
   lessonLearned: string;
 }): Promise<PostmortemGeneratedFields> {
   if (isOfflineAiProvider()) {
     return postmortemGeneratedFieldsSchema.parse({
-      summary: `${input.title} was resolved after Sentinel correlated the timeline, root cause, and remediation evidence.`,
+      summary: `${input.title} was resolved after OperaIQ correlated the timeline, root cause, and remediation evidence.`,
       contributingFactors: [
         input.rootCause,
         input.timeline.length > 1 ? "Multiple automated incident steps completed before closure." : "Limited timeline evidence was available."
@@ -256,7 +256,7 @@ export async function generateRunbook(input: {
   }
 
   const prompt = [
-    "Create an SRE runbook JSON object for Sentinel.",
+    "Create an SRE runbook JSON object for OperaIQ.",
     "Only use executable commands from this set when the step can be automated: scale_service, restart_pod, purge_cache, rotate_connection_pool, notify_team.",
     "Low-risk steps may be executable. Medium and high-risk steps should generally be non-executable unless they only notify a team.",
     "Return only JSON with title, incidentType, steps, successCriteria.",

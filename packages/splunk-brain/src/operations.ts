@@ -8,6 +8,7 @@ export interface NewSentinelIncident {
   status: "open" | "in_progress" | "resolved" | "escalated" | "failed";
   symptoms: string[];
   affectedServices: string[];
+  incidentType?: string | null;
   rootCause: string | null;
   resolution: string | null;
   remediationSteps: string[];

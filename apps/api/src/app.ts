@@ -5,7 +5,7 @@ import helmet from "helmet";
 import { z } from "zod";
 import {
   executeRemediation,
-  querySplunkLogs,
+  queryQdrantMemory,
   runSentinelAgent,
   sentinelAgentToolDefinitions,
   sentinelGetRunbook,
@@ -16,12 +16,12 @@ import {
 import {
   countDocuments,
   createCollection,
+  createKvKey,
   getDocument,
   insertDocument,
   insertSentinelIncident,
   queryAllDocuments,
   queryDocuments,
-  runSearch,
   updateDocument,
   updateSentinelIncident,
   writeAuditEntry
@@ -29,6 +29,7 @@ import {
 import {
   createLogger,
   isProductionRuntime,
+  normalizeAlertPayload,
   runtimeReadiness,
   paginationQuerySchema,
   type AgentEvent,
@@ -45,13 +46,51 @@ import { authRouter, requireAuth, verifyAuth, verifyWebhookOrg, type Authenticat
 
 loadRootEnv();
 
-const logger = createLogger("sentinel-api");
+const logger = createLogger("operaiq-api");
 const rawBodies = new WeakMap<Request, Buffer>();
 const adminRemediationBodySchema = z.object({
   action: z.enum(["scale_service", "restart_pod", "purge_cache", "rotate_connection_pool", "notify_team"]),
   targetService: z.string().min(1),
   parameters: z.record(z.union([z.string(), z.number()])).default({})
 });
+const createProjectBodySchema = z.object({
+  name: z.string().min(2).max(80),
+  service: z.string().min(1).max(80).default("payment-service"),
+  environment: z.string().min(1).max(40).default("local")
+});
+const appLogSchema = z.object({
+  level: z.enum(["debug", "info", "warn", "error", "fatal"]).default("error"),
+  service: z.string().min(1).max(80).default("payment-service"),
+  message: z.string().min(1).max(4_000),
+  stack: z.string().max(12_000).optional(),
+  errorName: z.string().max(160).optional(),
+  traceId: z.string().max(160).optional(),
+  requestId: z.string().max(160).optional(),
+  route: z.string().max(240).optional(),
+  statusCode: z.number().int().min(100).max(599).optional(),
+  latencyMs: z.number().min(0).max(120_000).optional(),
+  timestamp: z.string().datetime().optional(),
+  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).default({})
+});
+const ingestProjectLogsBodySchema = z.object({
+  logs: z.array(appLogSchema).min(1).max(80)
+});
+const qdrantPatternWebhookBodySchema = z.object({
+  patternAlertId: z.string().min(1),
+  orgId: z.string().min(1),
+  projectId: z.string().min(1),
+  projectName: z.string().min(1),
+  service: z.string().min(1),
+  severity: z.enum(["P1", "P2", "P3", "P4"]),
+  fingerprint: z.string().min(1),
+  logCount: z.number().int().positive(),
+  symptoms: z.array(z.string().min(1)).min(1),
+  sampleMessages: z.array(z.string()).default([]),
+  rawPayload: z.record(z.unknown()).default({})
+});
+
+type AppLog = z.infer<typeof appLogSchema>;
+type QdrantPatternWebhookBody = z.infer<typeof qdrantPatternWebhookBodySchema>;
 
 function rawBodySaver(req: Request, _res: Response, buf: Buffer): void {
   rawBodies.set(req, Buffer.from(buf));
@@ -100,7 +139,7 @@ function corsOptions(): Parameters<typeof cors>[0] {
         callback(null, true);
         return;
       }
-      callback(new Error("CORS origin is not allowed by Sentinel"));
+      callback(new Error("CORS origin is not allowed by OperaIQ"));
     }
   };
 }
@@ -122,7 +161,7 @@ function verifyToolSecret(req: Request): void {
   }
 }
 
-const SENTINEL_AUTONOMOUS_PAYMENT_SEARCH = "sentinel_auto_detect_payment_errors";
+const SENTINEL_AUTONOMOUS_PAYMENT_SEARCH = "operaiq_auto_detect_payment_errors";
 
 function severityFromSplunk(value: string | undefined): "P1" | "P2" | "P3" | "P4" {
   const normalized = value?.toUpperCase() ?? "";
@@ -193,8 +232,8 @@ function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
   if (payload.search_name === SENTINEL_AUTONOMOUS_PAYMENT_SEARCH || payload.search_name === "sentinel_test_payment_redis_spike") {
     const errorCount = splunkResultString(payload, "error_count") ?? splunkResultString(payload, "count");
     return {
-      source: "sentinel",
-      title: `Splunk alert: ${payload.search_name}`,
+      source: "operaiq",
+      title: `Legacy alert: ${payload.search_name}`,
       severity: "P3",
       affectedServices: ["payment-service"],
       symptoms: [
@@ -218,11 +257,11 @@ function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
     splunkResultString(payload, "_raw")
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   return {
-    source: "sentinel",
-    title: `Splunk alert: ${payload.search_name}`,
+    source: "operaiq",
+    title: `Legacy alert: ${payload.search_name}`,
     severity: severityFromSplunk(splunkResultString(payload, "severity") ?? payload.configuration?.severity),
     affectedServices: [service],
-    symptoms: symptoms.length > 0 ? symptoms.slice(0, 12) : ["splunk saved search alert fired"],
+    symptoms: symptoms.length > 0 ? symptoms.slice(0, 12) : ["legacy saved search alert fired"],
     incidentType: payload.search_name,
     detectedAt: new Date().toISOString(),
     rawPayload: payload as unknown as Record<string, unknown>
@@ -266,9 +305,9 @@ function testControlForceCrashPhase(req: Request, payload: SplunkAlertPayload): 
   return ["ASSESS", "REMEMBER", "INVESTIGATE", "MAP", "RETRIEVE", "ACT", "VERIFY", "CLOSE"].includes(normalized) ? normalized : undefined;
 }
 
-async function checkSplunkWebhookRateLimit(orgId: string): Promise<{ allowed: boolean; retryAfter: number }> {
+async function checkOperaIqWebhookRateLimit(orgId: string): Promise<{ allowed: boolean; retryAfter: number }> {
   await createCollection("rate_limit_windows", {});
-  const key = `splunk-alert-${orgId}`;
+  const key = `operaiq-alert-${orgId}`;
   const now = Date.now();
   const current = await getDocument<Record<string, unknown>>("rate_limit_windows", key).catch(() => null);
   const windowStartMs = typeof current?.windowStart === "string" ? Date.parse(current.windowStart) : Number.NaN;
@@ -292,12 +331,12 @@ async function checkSplunkWebhookRateLimit(orgId: string): Promise<{ allowed: bo
       timestamp: new Date().toISOString(),
       phase: "RATE_LIMITED",
       toolCalled: null,
-      input: { endpoint: "/webhooks/splunk-alert", orgId },
+      input: { endpoint: "/webhooks/alert", orgId },
       output: { count: nextCount },
       confidenceScore: null,
       durationMs: 0,
       success: false,
-      errorMessage: "Splunk alert webhook rate limit exceeded"
+      errorMessage: "OperaIQ alert webhook rate limit exceeded"
     });
     return { allowed: false, retryAfter: 60 };
   }
@@ -312,6 +351,7 @@ async function createSentinelIncidentFromAlert(alert: NormalizedAlert, orgId: st
     status: "open",
     symptoms: alert.symptoms,
     affectedServices: alert.affectedServices,
+    incidentType: alert.incidentType ?? null,
     rootCause: null,
     resolution: null,
     remediationSteps: [],
@@ -366,7 +406,7 @@ function serializeSentinelIncident(incident: Record<string, unknown>): Record<st
     createdAt: asString(incident.createdAt),
     updatedAt: asString(incident.updatedAt),
     embeddingDimensions: 0,
-    source: "sentinel",
+    source: "operaiq",
     agentEvents: asAgentEvents(incident.agentEvents),
     remediationAttempts: asNumber(incident.remediationAttempts) ?? 0,
     originalErrorCount: asNumber(incident.originalErrorCount),
@@ -427,7 +467,7 @@ function serializeSentinelService(service: Record<string, unknown>): Record<stri
     runbookIds: asStringArray(service.runbookIds),
     createdAt: asString(service.createdAt),
     updatedAt: asString(service.updatedAt),
-    source: "sentinel"
+    source: "operaiq"
   };
 }
 
@@ -440,7 +480,7 @@ async function listSentinelIncidents(limit: number, orgId: string): Promise<Reco
     const docs = await queryDocuments<Record<string, unknown>>("incidents", {}, limit, { orgId });
     return docs.map(serializeSentinelIncident);
   } catch (error: unknown) {
-    logger.warn({ error }, "Sentinel incidents unavailable for merged feed");
+    logger.warn({ error }, "OperaIQ incidents unavailable for merged feed");
     return [];
   }
 }
@@ -449,7 +489,7 @@ async function querySentinelCollection(collection: string, limit: number, orgId:
   try {
     return await queryDocuments<Record<string, unknown>>(collection, {}, limit, { orgId });
   } catch (error: unknown) {
-    logger.warn({ collection, error }, "Sentinel KV collection unavailable");
+    logger.warn({ collection, error }, "OperaIQ memory collection unavailable");
     return [];
   }
 }
@@ -458,13 +498,400 @@ async function countSentinelCollection(collection: string, orgId: string): Promi
   try {
     return await countDocuments(collection, {}, { orgId });
   } catch (error: unknown) {
-    logger.warn({ collection, error }, "Sentinel KV collection count unavailable");
+    logger.warn({ collection, error }, "OperaIQ memory collection count unavailable");
     return 0;
   }
 }
 
-function splunkDashboardUrl(): string {
-  return process.env.SPLUNK_DASHBOARD_URL ?? "http://localhost:8000/en-US/app/sentinel/sentinel_overview";
+function qdrantDashboardUrl(): string {
+  return process.env.QDRANT_DASHBOARD_URL ?? process.env.QDRANT_URL ?? "http://localhost:6333/dashboard";
+}
+
+function internalApiBaseUrl(): string {
+  return (process.env.OPERAIQ_INTERNAL_API_URL ?? `http://127.0.0.1:${process.env.PORT ?? "3001"}`).replace(/\/+$/, "");
+}
+
+function normalizeToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
+function logFingerprint(log: AppLog): string {
+  const body = [log.service, log.errorName, log.route, log.message, log.stack]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("|")
+    .toLowerCase();
+  if (body.includes("econnreset")) return `${log.service}:redis-econnreset`;
+  if (body.includes("connection pool")) return `${log.service}:connection-pool`;
+  if (body.includes("out of memory") || body.includes("heap")) return `${log.service}:memory-pressure`;
+  return `${log.service}:${normalizeToken(body) || "unknown-error"}`;
+}
+
+function severityFromLogs(logs: Array<Record<string, unknown>>): NormalizedAlert["severity"] {
+  if (logs.some((log) => log.level === "fatal")) return "P1";
+  const maxStatus = Math.max(...logs.map((log) => finiteNumber(log.statusCode)));
+  if (logs.length >= 8 || maxStatus >= 500) return "P2";
+  return "P3";
+}
+
+function logSymptomLines(logs: Array<Record<string, unknown>>): string[] {
+  const values = new Set<string>();
+  for (const log of logs) {
+    const level = asString(log.level).toUpperCase() || "ERROR";
+    const service = asString(log.service) || "unknown-service";
+    const message = asString(log.message);
+    const errorName = asString(log.errorName);
+    const route = asString(log.route);
+    const statusCode = finiteNumber(log.statusCode);
+    const latencyMs = finiteNumber(log.latencyMs);
+    values.add(`${level} ${service}: ${message}`.slice(0, 360));
+    if (errorName) values.add(`errorName=${errorName}`);
+    if (route) values.add(`route=${route}`);
+    if (statusCode > 0) values.add(`statusCode=${statusCode}`);
+    if (latencyMs > 0) values.add(`latencyMs=${latencyMs}`);
+  }
+  return Array.from(values).slice(0, 14);
+}
+
+function shouldTriggerPattern(logs: Array<Record<string, unknown>>): boolean {
+  const combined = logs.map((log) => `${asString(log.level)} ${asString(log.message)} ${asString(log.stack)} ${asString(log.errorName)}`).join("\n").toLowerCase();
+  if (logs.some((log) => log.level === "fatal")) return true;
+  if (logs.length >= 3 && combined.includes("econnreset")) return true;
+  if (logs.length >= 3 && combined.includes("connection pool")) return true;
+  if (logs.length >= 3 && combined.includes("unhandledpromiserejection")) return true;
+  if (logs.length >= 3 && (combined.includes("heap out of memory") || combined.includes("out of memory"))) return true;
+  return logs.length >= 5 && logs.some((log) => finiteNumber(log.statusCode) >= 500);
+}
+
+async function ensureProjectRuntimeMemory(input: {
+  orgId: string;
+  projectId: string;
+  projectName: string;
+  service: string;
+  environment: string;
+}): Promise<void> {
+  await Promise.all([
+    createCollection("projects", {}),
+    createCollection("events", {}),
+    createCollection("log_batches", {}),
+    createCollection("patterns", {}),
+    createCollection("pattern_alerts", {}),
+    createCollection("services", {}),
+    createCollection("service_runtime_configs", {}),
+    createCollection("runbooks", {}),
+    createCollection("incidents", {}),
+    createCollection("postmortems", {})
+  ]);
+  const now = new Date().toISOString();
+  const serviceDocs = await queryDocuments<Record<string, unknown>>("services", { name: input.service }, 1, { orgId: input.orgId });
+  if (serviceDocs.length === 0) {
+    await insertDocument("services", {
+      _key: `${input.projectId}-${input.service}`,
+      orgId: input.orgId,
+      name: input.service,
+      team: "payments-platform",
+      language: "nodejs",
+      dependencies: ["redis-cache", "checkout-api"],
+      dependents: ["checkout-web"],
+      knownFragilePoints: ["Redis ECONNRESET", "connection pool exhaustion", "checkout timeout bursts"],
+      slaMs: 800,
+      owners: ["local-oncall"],
+      runbookIds: [`${input.projectId}-redis-pool-runbook`],
+      projectId: input.projectId,
+      projectName: input.projectName,
+      environment: input.environment,
+      eventCount: 100,
+      errorCount: 0,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const redisDocs = await queryDocuments<Record<string, unknown>>("services", { name: "redis-cache" }, 1, { orgId: input.orgId });
+  if (redisDocs.length === 0) {
+    await insertDocument("services", {
+      _key: `${input.projectId}-redis-cache`,
+      orgId: input.orgId,
+      name: "redis-cache",
+      team: "payments-platform",
+      language: "redis",
+      dependencies: [],
+      dependents: [input.service],
+      knownFragilePoints: ["connection pool saturation", "ECONNRESET under checkout write load"],
+      slaMs: 200,
+      owners: ["local-oncall"],
+      runbookIds: [`${input.projectId}-redis-pool-runbook`],
+      projectId: input.projectId,
+      projectName: input.projectName,
+      environment: input.environment,
+      eventCount: 100,
+      errorCount: 0,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const runtimeConfigs = await queryDocuments<Record<string, unknown>>("service_runtime_configs", { serviceName: input.service }, 1, { orgId: input.orgId });
+  if (runtimeConfigs.length === 0) {
+    await insertDocument("service_runtime_configs", {
+      _key: `${input.projectId}-${input.service}-runtime`,
+      orgId: input.orgId,
+      serviceName: input.service,
+      adminBaseUrl: internalApiBaseUrl(),
+      incidentChannel: "local-verify",
+      cloudRunServiceName: input.service,
+      projectId: input.projectId,
+      environment: input.environment,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const redisRuntimeConfigs = await queryDocuments<Record<string, unknown>>("service_runtime_configs", { serviceName: "redis-cache" }, 1, { orgId: input.orgId });
+  if (redisRuntimeConfigs.length === 0) {
+    await insertDocument("service_runtime_configs", {
+      _key: `${input.projectId}-redis-cache-runtime`,
+      orgId: input.orgId,
+      serviceName: "redis-cache",
+      adminBaseUrl: internalApiBaseUrl(),
+      incidentChannel: "local-verify",
+      cloudRunServiceName: "redis-cache",
+      projectId: input.projectId,
+      environment: input.environment,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const runbooks = await queryDocuments<Record<string, unknown>>("runbooks", { _key: `${input.projectId}-redis-pool-runbook` }, 1, { orgId: input.orgId });
+  if (runbooks.length === 0) {
+    await insertDocument("runbooks", {
+      _key: `${input.projectId}-redis-pool-runbook`,
+      orgId: input.orgId,
+      title: "Recover payment checkout Redis connection pool failure",
+      incidentType: "qdrant_log_pattern",
+      applicableServices: [input.service, "redis-cache"],
+      steps: [
+        {
+          order: 1,
+          action: "Rotate the saturated Redis connection pool",
+          command: "rotate_connection_pool",
+          isExecutable: true,
+          riskLevel: "low"
+        },
+        {
+          order: 2,
+          action: "Notify payments on-call if verification stays hot",
+          command: "notify_team",
+          isExecutable: true,
+          riskLevel: "low"
+        }
+      ],
+      successCriteria: "Qdrant verification shows the correlated checkout error count drops below thirty percent of the original burst.",
+      fallbackAction: "notify_team",
+      projectId: input.projectId,
+      environment: input.environment,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const similarIncidents = await queryDocuments<Record<string, unknown>>("incidents", { _key: `${input.projectId}-prior-redis-econnreset` }, 1, { orgId: input.orgId });
+  if (similarIncidents.length === 0) {
+    await insertDocument("incidents", {
+      _key: `${input.projectId}-prior-redis-econnreset`,
+      orgId: input.orgId,
+      title: "Resolved checkout Redis ECONNRESET burst",
+      severity: "P2",
+      status: "resolved",
+      symptoms: ["Redis ECONNRESET", "payment-service checkout failures", "connection pool exhausted", "p99 latency elevated"],
+      affectedServices: [input.service, "redis-cache"],
+      rootCause: "redis-cache connection pool saturation caused checkout writes to fail",
+      resolution: "Rotated the Redis connection pool and verified checkout errors dropped.",
+      remediationSteps: ["rotate_connection_pool on redis-cache"],
+      detectedAt: now,
+      resolvedAt: now,
+      durationMinutes: 4,
+      postMortemId: null,
+      agentEvents: [],
+      rawPayload: { source: "project-runtime-memory" },
+      remediationAttempts: 1,
+      originalErrorCount: 42,
+      verifyResults: [{ timestamp: now, errorCount: 2, passed: true }],
+      severityUpgradedFrom: null,
+      severityUpgradeReason: null,
+      correlationReport: [],
+      rootCauseCandidate: "redis-cache",
+      bestSimilarityScore: 0.92,
+      projectId: input.projectId,
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+
+  const patterns = await queryDocuments<Record<string, unknown>>("patterns", { _key: `${input.projectId}-redis-econnreset-pattern` }, 1, { orgId: input.orgId });
+  if (patterns.length === 0) {
+    await insertDocument("patterns", {
+      _key: `${input.projectId}-redis-econnreset-pattern`,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      projectName: input.projectName,
+      name: "Qdrant checkout error burst watcher",
+      service: input.service,
+      type: "log_error_burst",
+      threshold: 3,
+      matchTerms: ["ECONNRESET", "connection pool exhausted", "UnhandledPromiseRejection"],
+      webhookPath: "/webhooks/qdrant-pattern",
+      createdAt: now,
+      updatedAt: now
+    }, { orgId: input.orgId });
+  }
+}
+
+async function fireQdrantPatternWebhook(payload: QdrantPatternWebhookBody): Promise<{ incidentId: string; status: string }> {
+  const secret = process.env.AGENT_TOOL_SECRET ?? process.env.WEBHOOK_SECRET;
+  if (!secret) throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required for Qdrant pattern webhooks");
+  const response = await fetch(`${internalApiBaseUrl()}/webhooks/qdrant-pattern`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      "Content-Type": "application/json",
+      "x-sentinel-tool-secret": secret
+    },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Qdrant pattern webhook failed with ${response.status}: ${body}`);
+  }
+  return JSON.parse(body) as { incidentId: string; status: string };
+}
+
+function groupKeyForLog(log: Record<string, unknown>): string {
+  return [asString(log.orgId), asString(log.projectId), asString(log.service), asString(log.fingerprint)].join("|");
+}
+
+let qdrantPatternEvaluationRunning = false;
+
+async function logBatchComplete(log: Record<string, unknown>, cache: Map<string, boolean>): Promise<boolean> {
+  const batchId = asString(log.batchId);
+  if (!batchId) return true;
+  const orgId = asString(log.orgId);
+  if (!orgId) return false;
+  const cacheKey = `${orgId}:${batchId}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey) === true;
+  const batch = await getDocument<Record<string, unknown>>("log_batches", batchId, { orgId }).catch(() => null);
+  const complete = batch?.status === "complete";
+  cache.set(cacheKey, complete);
+  return complete;
+}
+
+async function evaluateQdrantLogPatterns(): Promise<{ scanned: number; fired: number }> {
+  if (qdrantPatternEvaluationRunning) return { scanned: 0, fired: 0 };
+  qdrantPatternEvaluationRunning = true;
+  try {
+    await Promise.all([createCollection("events", {}), createCollection("log_batches", {}), createCollection("pattern_alerts", {})]);
+    const pending = await queryAllDocuments<Record<string, unknown>>("events", { type: "app_log", patternChecked: false }, 1_000);
+    const groups = new Map<string, Array<Record<string, unknown>>>();
+    const batchCache = new Map<string, boolean>();
+    for (const log of pending) {
+      const orgId = asString(log.orgId);
+      const projectId = asString(log.projectId);
+      const service = asString(log.service);
+      const fingerprint = asString(log.fingerprint);
+      if (!orgId || !projectId || !service || !fingerprint) continue;
+      if (!(await logBatchComplete(log, batchCache))) continue;
+      const key = groupKeyForLog(log);
+      groups.set(key, [...(groups.get(key) ?? []), log]);
+    }
+
+    let fired = 0;
+    for (const logs of groups.values()) {
+      if (!shouldTriggerPattern(logs)) continue;
+      const first = logs[0]!;
+      const orgId = asString(first.orgId);
+      const projectId = asString(first.projectId);
+      const projectName = asString(first.projectName) || projectId;
+      const service = asString(first.service);
+      const fingerprint = asString(first.fingerprint);
+      const duplicate = await queryDocuments<Record<string, unknown>>("pattern_alerts", { projectId, fingerprint, status: "webhook_accepted" }, 1, { orgId });
+      if (duplicate.length > 0) {
+        await Promise.all(logs.map((log) => updateDocument("events", asString(log._key), { patternChecked: true, duplicatePatternAlertId: duplicate[0]!._key }, { orgId })));
+        continue;
+      }
+
+      const now = new Date().toISOString();
+      const symptoms = logSymptomLines(logs);
+      const sampleMessages = logs.map((log) => asString(log.message)).filter(Boolean).slice(0, 6);
+      const severity = severityFromLogs(logs);
+      const patternAlertId = createKvKey();
+      await insertDocument("pattern_alerts", {
+        _key: patternAlertId,
+        orgId,
+        projectId,
+        projectName,
+        service,
+        type: "qdrant_pattern_match",
+        fingerprint,
+        severity,
+        status: "matched",
+        logCount: logs.length,
+        symptoms,
+        sampleMessages,
+        source: "qdrant-pattern-watcher",
+        webhookPath: "/webhooks/qdrant-pattern",
+        createdAt: now,
+        updatedAt: now
+      }, { orgId });
+
+      await Promise.all(logs.map((log) => updateDocument("events", asString(log._key), { patternChecked: true, patternAlertId }, { orgId })));
+
+      try {
+        const result = await fireQdrantPatternWebhook({
+          patternAlertId,
+          orgId,
+          projectId,
+          projectName,
+          service,
+          severity,
+          fingerprint,
+          logCount: logs.length,
+          symptoms,
+          sampleMessages,
+          rawPayload: { logKeys: logs.map((log) => asString(log._key)), source: "qdrant-pattern-watcher" }
+        });
+        await updateDocument("pattern_alerts", patternAlertId, {
+          status: "webhook_accepted",
+          webhookFiredAt: new Date().toISOString(),
+          incidentId: result.incidentId,
+          webhookResult: result
+        }, { orgId });
+        fired += 1;
+      } catch (error: unknown) {
+        await updateDocument("pattern_alerts", patternAlertId, {
+          status: "webhook_failed",
+          webhookFailedAt: new Date().toISOString(),
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }, { orgId });
+        logger.error({ error, patternAlertId }, "Qdrant pattern webhook dispatch failed");
+      }
+    }
+    return { scanned: pending.length, fired };
+  } finally {
+    qdrantPatternEvaluationRunning = false;
+  }
+}
+
+let qdrantPatternWatcherStarted = false;
+
+function startQdrantPatternWatcher(): void {
+  if (qdrantPatternWatcherStarted) return;
+  qdrantPatternWatcherStarted = true;
+  const timer = setInterval(() => {
+    evaluateQdrantLogPatterns().catch((error: unknown) => {
+      logger.warn({ error }, "Qdrant pattern watcher failed");
+    });
+  }, 2_000);
+  timer.unref();
 }
 
 function finiteNumber(value: unknown): number {
@@ -517,20 +944,21 @@ function severityDistribution(incidents: Record<string, unknown>[]): Array<{ sev
   return ["P1", "P2", "P3", "P4"].map((severity) => ({ severity, count: counts.get(severity) ?? 0 }));
 }
 
-async function serviceHealthFromSplunk(): Promise<Array<{ service: string; eventCount: number; errorCount: number; errorRate: number }>> {
-  const results = await runSearch(
-    'index=prod sourcetype=app earliest=-15m | stats count as event_count, count(eval(level="error")) as error_count by service | eval error_rate=round(error_count/event_count*100,1) | sort -error_rate',
-    { maxResults: 20 }
-  ).catch((error: unknown) => {
-    logger.warn({ error }, "Splunk service health search failed");
+async function serviceHealthFromQdrant(orgId: string): Promise<Array<{ service: string; eventCount: number; errorCount: number; errorRate: number }>> {
+  const services = await queryDocuments<Record<string, unknown>>("services", {}, 100, { orgId }).catch((error: unknown) => {
+    logger.warn({ error }, "Qdrant service health lookup failed");
     return [];
   });
-  return results.map((result) => ({
-    service: asString(result.service) || "unknown",
-    eventCount: finiteNumber(result.event_count),
-    errorCount: finiteNumber(result.error_count),
-    errorRate: finiteNumber(result.error_rate)
-  }));
+  return services.map((service) => {
+    const eventCount = finiteNumber(service.eventCount) || 100;
+    const errorCount = finiteNumber(service.errorCount) || 0;
+    return {
+      service: asString(service.name) || asString(service.service) || "unknown",
+      eventCount,
+      errorCount,
+      errorRate: eventCount > 0 ? Number(((errorCount / eventCount) * 100).toFixed(1)) : 0
+    };
+  });
 }
 
 function timestampMs(value: unknown): number {
@@ -563,7 +991,7 @@ async function getSentinelIncidentView(id: string, orgId: string): Promise<{
 
 function alertFromSentinelIncident(incident: Record<string, unknown>): NormalizedAlert {
   return {
-    source: "sentinel",
+    source: "operaiq",
     title: asString(incident.title),
     severity: severityForAlert(incident.severity),
     affectedServices: asStringArray(incident.affectedServices).length > 0 ? asStringArray(incident.affectedServices) : ["unknown-service"],
@@ -585,12 +1013,12 @@ async function runSentinelForIncident(input: {
   const current = await getDocument<Record<string, unknown>>("incidents", input.incidentId, { orgId: input.orgId }).catch(() => null);
   const agentEvents = asAgentEvents(current?.agentEvents).slice();
   const result = await runSentinelAgent(input, async (event) => {
-    logger.info({ event }, "Sentinel agent event");
+    logger.info({ event }, "OperaIQ agent event");
     agentEvents.push(event);
     dispatchAgentEvent(event);
     await updateSentinelIncident(input.incidentId, input.orgId, { agentEvents });
   });
-  logger.info({ incidentId: input.incidentId, result }, "Sentinel agent completed");
+  logger.info({ incidentId: input.incidentId, result }, "OperaIQ agent completed");
 }
 
 async function notifyDlqFailure(incident: Record<string, unknown>, orgId: string): Promise<void> {
@@ -601,11 +1029,11 @@ async function notifyDlqFailure(incident: Record<string, unknown>, orgId: string
     parameters: {
       riskLevel: "low",
       severity: asString(incident.severity) || "P2",
-      symptoms: asStringArray(incident.symptoms).join(", ") || "stale Sentinel incident",
+      symptoms: asStringArray(incident.symptoms).join(", ") || "stale OperaIQ incident",
       orgId,
       incidentId: asString(incident._key),
-      reasoning: "Sentinel DLQ retries exceeded.",
-      escalationMessage: `Sentinel failed - ${targetService}\nMax DLQ retries exceeded for incident ${asString(incident._key)}.\n@oncall please investigate.`
+      reasoning: "OperaIQ DLQ retries exceeded.",
+      escalationMessage: `OperaIQ failed - ${targetService}\nMax DLQ retries exceeded for incident ${asString(incident._key)}.\n@oncall please investigate.`
     }
   }).catch((error: unknown) => {
     logger.warn({ error, incidentId: asString(incident._key) }, "Failed to notify DLQ failure");
@@ -650,7 +1078,7 @@ async function flushDeadLetterQueue(options: { force?: boolean } = {}): Promise<
       _key: incidentId,
       orgId,
       incidentId,
-      errorMessage: typeof currentDlq?.errorMessage === "string" ? currentDlq.errorMessage : "Stale in_progress Sentinel incident",
+      errorMessage: typeof currentDlq?.errorMessage === "string" ? currentDlq.errorMessage : "Stale in_progress OperaIQ incident",
       stackTrace: typeof currentDlq?.stackTrace === "string" ? currentDlq.stackTrace : "",
       attemptCount: nextAttempt,
       lastAttempt: new Date().toISOString(),
@@ -687,7 +1115,7 @@ function startDlqMaintenance(): void {
   dlqMaintenanceStarted = true;
   const timer = setInterval(() => {
     flushDeadLetterQueue().catch((error: unknown) => {
-      logger.warn({ error }, "Sentinel DLQ maintenance failed");
+      logger.warn({ error }, "OperaIQ DLQ maintenance failed");
     });
   }, 120_000);
   timer.unref();
@@ -697,7 +1125,7 @@ type ToolHandler = (input: unknown) => Promise<unknown>;
 
 const toolHandlers: Record<string, ToolHandler> = {
   search_similar_incidents: sentinelSearchSimilarIncidents,
-  query_splunk_logs: querySplunkLogs,
+  query_qdrant_memory: queryQdrantMemory,
   get_service_dependency_graph: sentinelGetServiceDependencyGraph,
   get_runbook: sentinelGetRunbook,
   execute_remediation: executeRemediation,
@@ -746,7 +1174,7 @@ function toolOpenApiDocument(): Record<string, unknown> {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Sentinel Agent Tools",
+      title: "OperaIQ Agent Tools",
       version: "0.1.0"
     },
     servers: [
@@ -797,7 +1225,7 @@ export function createApp(): express.Express {
       let brainSize = 0;
       let orgCount = 0;
       let userCount = 0;
-      let splunkKvStore: "ok" | "unavailable" = "unavailable";
+      let qdrantMemory: "ok" | "unavailable" = "unavailable";
 
       try {
         const [incidents, orgs, users] = await Promise.all([
@@ -808,19 +1236,19 @@ export function createApp(): express.Express {
         brainSize = incidents.length;
         orgCount = orgs.length;
         userCount = users.length;
-        splunkKvStore = "ok";
+        qdrantMemory = "ok";
       } catch (error: unknown) {
-        logger.warn({ error }, "Sentinel health dependency check failed");
-        issues.push(`Splunk KV Store unavailable: ${healthErrorMessage(error)}`);
+        logger.warn({ error }, "OperaIQ health dependency check failed");
+        issues.push(`Qdrant memory unavailable: ${healthErrorMessage(error)}`);
       }
 
       const readiness = runtimeReadiness();
       issues.push(...readiness.violations);
-      if (splunkKvStore === "ok" && (orgCount === 0 || userCount === 0)) {
-        issues.push("No Sentinel auth org/user is seeded; login cannot succeed");
+      if (qdrantMemory === "ok" && (orgCount === 0 || userCount === 0)) {
+        issues.push("No OperaIQ auth org/user is seeded; login cannot succeed");
       }
-      if (splunkKvStore === "ok" && brainSize === 0) {
-        warnings.push("No incidents are seeded yet; dashboard and brain views will be empty until Splunk sends alerts or seed data is loaded");
+      if (qdrantMemory === "ok" && brainSize === 0) {
+        warnings.push("No incidents are seeded yet; dashboard and brain views will be empty until Qdrant seed data or live alerts are loaded");
       }
 
       res.json({
@@ -829,7 +1257,7 @@ export function createApp(): express.Express {
         authReady: orgCount > 0 && userCount > 0,
         orgCount,
         userCount,
-        splunkKvStore,
+        qdrantMemory,
         runtime: readiness,
         issues,
         warnings
@@ -845,13 +1273,228 @@ export function createApp(): express.Express {
   );
 
   app.post(
+    "/webhooks/alert",
+    asyncHandler(async (req, res) => {
+      const orgId = typeof req.query.orgId === "string" ? req.query.orgId : "";
+      const secret = typeof req.query.secret === "string" ? req.query.secret : "";
+      const org = await verifyWebhookOrg(orgId, secret);
+      const rateLimit = await checkOperaIqWebhookRateLimit(org.orgId);
+      if (!rateLimit.allowed) {
+        res.setHeader("Retry-After", String(rateLimit.retryAfter));
+        res.status(429).json({ error: "Rate limit exceeded" });
+        return;
+      }
+      const alert = normalizeAlertPayload(req.body);
+      const incidentId = await createSentinelIncidentFromAlert(alert, org.orgId);
+      setImmediate(() => {
+        runSentinelForIncident({ incidentId, orgId: org.orgId, alert })
+          .catch((error: unknown) => {
+            logger.error({ incidentId, error }, "OperaIQ agent failed");
+          });
+      });
+      res.status(202).json({ incidentId, status: "open", trigger: "operaiq-alert" });
+    })
+  );
+
+  app.post(
+    "/webhooks/qdrant-pattern",
+    asyncHandler(async (req, res) => {
+      verifyToolSecret(req);
+      const body = qdrantPatternWebhookBodySchema.parse(req.body);
+      const alert: NormalizedAlert = {
+        source: "operaiq",
+        title: `Qdrant pattern: ${body.projectName} ${body.service} ${body.fingerprint}`,
+        severity: body.severity,
+        affectedServices: [body.service],
+        symptoms: body.symptoms,
+        incidentType: "qdrant_log_pattern",
+        detectedAt: new Date().toISOString(),
+        rawPayload: {
+          ...body.rawPayload,
+          patternAlertId: body.patternAlertId,
+          projectId: body.projectId,
+          projectName: body.projectName,
+          fingerprint: body.fingerprint,
+          logCount: body.logCount,
+          sampleMessages: body.sampleMessages,
+          webhook: "/webhooks/qdrant-pattern"
+        }
+      };
+      const incidentId = await createSentinelIncidentFromAlert(alert, body.orgId);
+      await updateDocument("pattern_alerts", body.patternAlertId, {
+        incidentId,
+        status: "webhook_received",
+        webhookReceivedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { orgId: body.orgId });
+      setImmediate(() => {
+        runSentinelForIncident({ incidentId, orgId: body.orgId, alert })
+          .catch((error: unknown) => {
+            logger.error({ incidentId, error }, "OperaIQ Qdrant pattern agent failed");
+          });
+      });
+      res.status(202).json({ incidentId, status: "open", trigger: "qdrant-pattern-webhook" });
+    })
+  );
+
+  app.post(
+    "/projects",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const body = createProjectBodySchema.parse(req.body);
+      await createCollection("projects", {});
+      const now = new Date().toISOString();
+      const projectId = createKvKey();
+      const project = {
+        _key: projectId,
+        orgId: auth.orgId,
+        name: body.name.trim(),
+        service: body.service,
+        environment: body.environment,
+        ingestUrl: `${process.env.API_PUBLIC_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/projects/${projectId}/logs`,
+        createdAt: now,
+        updatedAt: now
+      };
+      await insertDocument("projects", project, { orgId: auth.orgId });
+      await ensureProjectRuntimeMemory({
+        orgId: auth.orgId,
+        projectId,
+        projectName: project.name,
+        service: body.service,
+        environment: body.environment
+      });
+      res.status(201).json({ project });
+    })
+  );
+
+  app.post(
+    "/projects/:id/logs",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const projectId = typeof req.params.id === "string" ? req.params.id : "";
+      const project = await getDocument<Record<string, unknown>>("projects", projectId, { orgId: auth.orgId });
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const body = ingestProjectLogsBodySchema.parse(req.body);
+      const now = new Date().toISOString();
+      const batchId = createKvKey();
+      await createCollection("log_batches", {});
+      await insertDocument("log_batches", {
+        _key: batchId,
+        orgId: auth.orgId,
+        projectId,
+        projectName: asString(project.name),
+        status: "open",
+        expectedCount: body.logs.length,
+        source: "user-test-app",
+        createdAt: now,
+        updatedAt: now
+      }, { orgId: auth.orgId });
+      const inserted: string[] = [];
+      for (const log of body.logs) {
+        const occurredAt = log.timestamp ?? now;
+        const fingerprint = logFingerprint(log);
+        const doc = {
+          orgId: auth.orgId,
+          projectId,
+          projectName: asString(project.name),
+          type: "app_log",
+          source: "user-test-app",
+          batchId,
+          level: log.level,
+          service: log.service,
+          environment: asString(project.environment) || "local",
+          message: log.message,
+          stack: log.stack ?? null,
+          errorName: log.errorName ?? null,
+          traceId: log.traceId ?? null,
+          requestId: log.requestId ?? null,
+          route: log.route ?? null,
+          statusCode: log.statusCode ?? null,
+          latencyMs: log.latencyMs ?? null,
+          metadata: log.metadata,
+          fingerprint,
+          errorCount: log.level === "error" || log.level === "fatal" ? 1 : 0,
+          patternChecked: false,
+          occurredAt,
+          createdAt: now,
+          updatedAt: now
+        };
+        const result = await insertDocument("events", doc, { orgId: auth.orgId });
+        inserted.push(result._key);
+      }
+      await updateDocument("log_batches", batchId, {
+        status: "complete",
+        completedAt: new Date().toISOString(),
+        eventIds: inserted,
+        acceptedCount: inserted.length
+      }, { orgId: auth.orgId });
+      setImmediate(() => {
+        evaluateQdrantLogPatterns().catch((error: unknown) => {
+          logger.warn({ error, projectId }, "Immediate Qdrant pattern evaluation failed");
+        });
+      });
+      res.status(202).json({ accepted: inserted.length, eventIds: inserted, projectId, batchId, qdrant: "stored" });
+    })
+  );
+
+  app.get(
+    "/projects/:id/flow",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const projectId = typeof req.params.id === "string" ? req.params.id : "";
+      const project = await getDocument<Record<string, unknown>>("projects", projectId, { orgId: auth.orgId });
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const [logs, patternAlerts] = await Promise.all([
+        queryDocuments<Record<string, unknown>>("events", { projectId, type: "app_log" }, 1_000, { orgId: auth.orgId }),
+        queryDocuments<Record<string, unknown>>("pattern_alerts", { projectId }, 50, { orgId: auth.orgId })
+      ]);
+      const latestAlert = patternAlerts.sort((left, right) => timestampMs(right.createdAt) - timestampMs(left.createdAt))[0] ?? null;
+      const incidentId = typeof latestAlert?.incidentId === "string" ? latestAlert.incidentId : null;
+      const incident = incidentId ? await getDocument<Record<string, unknown>>("incidents", incidentId, { orgId: auth.orgId }).catch(() => null) : null;
+      const audit = incidentId ? await queryDocuments<Record<string, unknown>>("audit_log", { incidentId }, 100, { orgId: auth.orgId }).catch(() => []) : [];
+      const postmortems = incidentId ? await queryDocuments<Record<string, unknown>>("postmortems", { incidentId }, 10, { orgId: auth.orgId }).catch(() => []) : [];
+      const phases = audit.map((entry) => asString(entry.phase)).filter(Boolean);
+      res.json({
+        project,
+        counts: {
+          logsStored: logs.length,
+          patternAlerts: patternAlerts.length,
+          auditEntries: audit.length,
+          postmortems: postmortems.length
+        },
+        latestPatternAlert: latestAlert,
+        incident: incident ? serializeSentinelIncident(incident) : null,
+        postmortem: postmortems[0] ? serializeSentinelPostmortem(postmortems[0]!) : null,
+        audit: audit.map(serializeAuditEntry).sort((left, right) => timestampMs(left.timestamp) - timestampMs(right.timestamp)),
+        stages: {
+          appLogsStored: logs.length > 0,
+          qdrantPatternMatched: patternAlerts.length > 0,
+          webhookFired: Boolean(latestAlert?.webhookFiredAt || latestAlert?.webhookReceivedAt || incidentId),
+          operaiqActed: phases.includes("ACT"),
+          operaiqVerified: phases.includes("VERIFY"),
+          qdrantPostmortemStored: postmortems.length > 0
+        }
+      });
+    })
+  );
+
+  app.post(
     "/webhooks/splunk-alert",
     asyncHandler(async (req, res) => {
       const orgId = typeof req.query.orgId === "string" ? req.query.orgId : "";
       const secret = typeof req.query.secret === "string" ? req.query.secret : "";
       const org = await verifyWebhookOrg(orgId, secret);
       const payload = normalizeSplunkAlertBody(req.body);
-      const rateLimit = await checkSplunkWebhookRateLimit(org.orgId);
+      const rateLimit = await checkOperaIqWebhookRateLimit(org.orgId);
       if (!rateLimit.allowed) {
         res.setHeader("Retry-After", String(rateLimit.retryAfter));
         res.status(429).json({ error: "Rate limit exceeded" });
@@ -872,10 +1515,10 @@ export function createApp(): express.Express {
           ...(forceCrashPhase !== undefined ? { forceCrashPhase } : {})
         })
           .catch((error: unknown) => {
-            logger.error({ incidentId, error }, "Sentinel agent failed");
+            logger.error({ incidentId, error }, "OperaIQ agent failed");
           });
       });
-      res.status(202).json({ incidentId, status: "open", trigger: "splunk-alert-action" });
+      res.status(202).json({ incidentId, status: "open", trigger: "legacy-splunk-alert-action" });
     })
   );
 
@@ -889,9 +1532,9 @@ export function createApp(): express.Express {
       }
       const payloadField = typeof req.body.payload === "string" ? req.body.payload : "";
       const payload = JSON.parse(payloadField) as { actions?: Array<{ action_id?: string; value?: string }> };
-      const action = payload.actions?.find((item) => item.action_id === "sentinel_approve_remediation");
+      const action = payload.actions?.find((item) => item.action_id === "operaiq_approve_remediation" || item.action_id === "sentinel_approve_remediation");
       if (!action?.value) {
-        res.status(400).json({ error: "No Sentinel approval action found" });
+        res.status(400).json({ error: "No OperaIQ approval action found" });
         return;
       }
       const approved = JSON.parse(action.value) as {
@@ -933,7 +1576,7 @@ export function createApp(): express.Express {
         action: body.action,
         targetService: body.targetService,
         acceptedAt,
-        output: `Accepted ${body.action} for ${body.targetService}; Sentinel admin endpoint recorded the remediation request.`
+        output: `Accepted ${body.action} for ${body.targetService}; OperaIQ admin endpoint recorded the remediation request.`
       });
     })
   );
@@ -1134,14 +1777,14 @@ export function createApp(): express.Express {
   );
 
   app.get(
-    "/splunk/overview",
+    "/qdrant/overview",
     requireAuth,
     asyncHandler(async (_req, res) => {
       const auth = (_req as AuthenticatedRequest).auth ?? verifyAuth(_req);
       const [incidents, auditEntries, serviceHealth] = await Promise.all([
         querySentinelCollection("incidents", 10_000, auth.orgId),
         querySentinelCollection("audit_log", 500, auth.orgId),
-        serviceHealthFromSplunk()
+        serviceHealthFromQdrant(auth.orgId)
       ]);
       const activeIncidents = incidents.filter((incident) => incident.status === "open" || incident.status === "in_progress").length;
       const recentAgentDecisions = auditEntries
@@ -1157,7 +1800,7 @@ export function createApp(): express.Express {
           incidentId: asString(entry.incidentId)
         }));
       res.json({
-        nativeDashboardUrl: splunkDashboardUrl(),
+        nativeDashboardUrl: qdrantDashboardUrl(),
         activeIncidents,
         brainSize: incidents.filter((incident) => incident.status === "resolved").length,
         resolutionTimeline: resolutionTimeline(incidents),
@@ -1178,6 +1821,7 @@ export function createApp(): express.Express {
   );
 
   startDlqMaintenance();
+  startQdrantPatternWatcher();
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const status =
@@ -1188,7 +1832,7 @@ export function createApp(): express.Express {
         : status === 403
           ? "Forbidden"
           : status === 503
-            ? "Sentinel dependency unavailable"
+            ? "OperaIQ dependency unavailable"
             : error instanceof Error
               ? error.message
               : "Unknown error";

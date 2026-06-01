@@ -3,8 +3,8 @@ import { Shell } from "./shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sentinel",
-  description: "Splunk-native autonomous incident response"
+  title: "OperaIQ",
+  description: "Qdrant-powered autonomous incident response"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

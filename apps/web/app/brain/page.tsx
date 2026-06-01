@@ -75,7 +75,7 @@ export default function BrainPage() {
   return (
     <div className="min-w-0 space-y-4">
       {error ? <div className="border border-critical bg-panel px-3 py-2 text-[13px] text-critical">{error}</div> : null}
-      {loading ? <div className="border border-border bg-panel px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Loading Sentinel brain</div> : null}
+      {loading ? <div className="border border-border bg-panel px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Loading OperaIQ brain</div> : null}
 
       <section className={`border bg-panel ${runtime?.mode === "production-blocked" ? "border-critical" : runtime?.mode === "autonomous-ready" ? "border-active" : "border-warning"}`}>
         <div className="flex flex-col gap-2 px-3 py-2 md:flex-row md:items-center md:justify-between">
@@ -95,7 +95,7 @@ export default function BrainPage() {
       </section>
 
       <section className="border border-border bg-panel">
-        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground">Sentinel brain</div>
+        <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-foreground">Qdrant vector brain</div>
         <div className="space-y-3 p-3">
           <div className="font-mono text-[13px] text-muted">
             <span className="text-accent">{stats?.incidentCount ?? "--"}</span> incidents ·{" "}
@@ -129,7 +129,7 @@ export default function BrainPage() {
               </Link>
             ))}
             {(stats?.brainGrowth ?? []).length === 0 ? (
-              <div className="font-mono text-[12px] text-muted">No resolved Sentinel incidents yet.</div>
+              <div className="font-mono text-[12px] text-muted">No resolved OperaIQ incidents yet.</div>
             ) : null}
           </div>
         </div>

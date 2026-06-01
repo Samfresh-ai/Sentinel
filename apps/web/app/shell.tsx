@@ -128,10 +128,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
   if (!showChrome) {
     const copy =
       sessionStatus === "failed"
-        ? "Sentinel API is not responding. Refreshing will retry the session check."
+        ? "OperaIQ API is not responding. Refreshing will retry the session check."
         : sessionStatus === "unauthenticated"
           ? "Redirecting to setup"
-          : "Checking Sentinel session";
+          : "Checking OperaIQ session";
     return (
       <div className="min-h-screen bg-background text-foreground">
         <main className="flex min-h-screen items-center justify-center px-4">
@@ -162,7 +162,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <header className="h-14 border-b border-border bg-background">
         <div className="flex h-full items-center justify-between gap-4 px-5">
           <Link href="/" className="font-mono text-[15px] font-semibold uppercase tracking-[0.18em] text-foreground">
-            SENTINEL
+            OPERAIQ
           </Link>
           <div className="hidden min-w-0 truncate font-mono text-[12px] text-muted sm:block">
             Brain: <span className="text-accent">{stats?.incidentCount ?? "--"}</span> incidents · Last resolved:{" "}
@@ -179,8 +179,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Link href="/brain" className={navClass(pathname === "/brain")}>
               Brain
             </Link>
-            <Link href="/splunk" className={navClass(pathname === "/splunk")}>
-              Splunk
+            <Link href="/qdrant" className={navClass(pathname === "/qdrant")}>
+              Qdrant
+            </Link>
+            <Link href="/test-app" className={navClass(pathname === "/test-app")}>
+              Test App
             </Link>
             <Link href="/services" className={navClass(pathname === "/services")}>
               Services
@@ -189,9 +192,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div className="hidden border-t border-border p-4 md:block">
             <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-deep">Status</div>
             <div className="space-y-3">
-              <StatusDot label="Splunk" />
+              <StatusDot label="Qdrant" />
               <StatusDot label="Agent" />
-              <StatusDot label="HEC" />
+              <StatusDot label="Memory" />
             </div>
           </div>
         </aside>

@@ -10,6 +10,8 @@ dist
 !.env.example
 .git
 .serena
+.secrets
+**/.secrets
 *.log
 coverage
 tmp

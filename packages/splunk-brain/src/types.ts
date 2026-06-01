@@ -1,15 +1,15 @@
 import { z } from "zod";
 
-export const splunkRecordSchema = z.record(z.unknown()).and(z.object({ _key: z.string().optional() }).passthrough());
-export type SplunkRecord = z.infer<typeof splunkRecordSchema>;
+export const qdrantRecordSchema = z.record(z.unknown()).and(z.object({ _key: z.string().optional() }).passthrough());
+export type QdrantRecord = z.infer<typeof qdrantRecordSchema>;
 
-export const splunkSearchResultSchema = z.record(z.unknown());
-export type SplunkSearchResult = z.infer<typeof splunkSearchResultSchema>;
+export const qdrantSearchResultSchema = z.record(z.unknown());
+export type QdrantSearchResult = z.infer<typeof qdrantSearchResultSchema>;
 
-export const splunkEventSchema = z.record(z.unknown());
-export type SplunkEvent = z.infer<typeof splunkEventSchema>;
+export const qdrantEventSchema = z.record(z.unknown());
+export type QdrantEvent = z.infer<typeof qdrantEventSchema>;
 
-export interface SplunkHECEvent {
+export interface QdrantMemoryEvent {
   time?: number;
   host?: string;
   source?: string;
@@ -29,3 +29,11 @@ export interface SimilarIncident {
   severity: string;
   similarity: number;
 }
+
+export const splunkRecordSchema = qdrantRecordSchema;
+export type SplunkRecord = QdrantRecord;
+export const splunkSearchResultSchema = qdrantSearchResultSchema;
+export type SplunkSearchResult = QdrantSearchResult;
+export const splunkEventSchema = qdrantEventSchema;
+export type SplunkEvent = QdrantEvent;
+export type SplunkHECEvent = QdrantMemoryEvent;

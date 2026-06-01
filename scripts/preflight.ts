@@ -90,9 +90,9 @@ async function main(): Promise<void> {
   const requiredVariables = [
     "WEBHOOK_SECRET",
     "NEXT_PUBLIC_API_URL",
-    "SPLUNK_USERNAME",
-    "SPLUNK_PASSWORD",
-    "SPLUNK_HEC_TOKEN"
+    "QDRANT_URL",
+    "QDRANT_COLLECTION",
+    "EMBEDDING_PROVIDER"
   ];
   if (usesVertex || usesCloudRun) {
     requiredVariables.push("GOOGLE_CLOUD_PROJECT_ID");
@@ -102,6 +102,12 @@ async function main(): Promise<void> {
   }
   if (provider === "openai-compatible") {
     requiredVariables.push("OPENAI_COMPATIBLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_MODEL");
+  }
+  if (envValue("EMBEDDING_PROVIDER").toLowerCase() === "nvidia") {
+    requiredVariables.push("NVIDIA_API_KEY");
+  }
+  if (envValue("EMBEDDING_PROVIDER").toLowerCase() === "openai") {
+    requiredVariables.push("OPENAI_API_KEY");
   }
   if (usesVertex) {
     requiredVariables.push("VERTEX_AI_LOCATION");
@@ -128,14 +134,14 @@ async function main(): Promise<void> {
     const gcloud = checkCommand("gcloud", ["--version"]);
     checks.push({ name: "gcloud", ...gcloud });
   } else {
-    checks.push({ name: "gcloud", ok: true, detail: "skipped for Sentinel admin-endpoint deployment" });
+    checks.push({ name: "gcloud", ok: true, detail: "skipped for OperaIQ admin-endpoint deployment" });
   }
   if (!productionMode) {
     const docker = checkCommand("docker", ["info"]);
     checks.push({ name: "docker-daemon", ...docker });
   }
-  checks.push({ name: "splunk", ok: true, detail: "checked by scripts/splunk-setup-check.ts" });
-  checks.push({ name: "webhook-flow", ok: true, detail: "Sentinel uses Splunk Alert Action webhooks" });
+  checks.push({ name: "qdrant", ok: true, detail: "checked by scripts/qdrant-setup-check.ts" });
+  checks.push({ name: "webhook-flow", ok: true, detail: "OperaIQ accepts generic incident alert webhooks" });
   if (offlineAi) {
     checks.push({ name: "vertex-ai", ok: true, detail: "skipped because SENTINEL_AI_PROVIDER=offline" });
   }
@@ -161,7 +167,7 @@ async function main(): Promise<void> {
     localVerifyMode || offlineAi
       ? "PASSED preflight - local verification prerequisites are reachable"
       : productionMode
-        ? "PASSED preflight - production Sentinel prerequisites are reachable"
+        ? "PASSED preflight - production OperaIQ prerequisites are reachable"
       : "PASSED preflight - all required local and cloud prerequisites are reachable"
   );
 }

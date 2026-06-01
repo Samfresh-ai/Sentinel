@@ -1,0 +1,33 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    container_name: operaiq-qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - operaiq-qdrant-storage:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+    networks:
+      - operaiq
+
+  api:
+    image: operaiq-api:latest
+    container_name: operaiq-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      - qdrant
+    networks:
+      - operaiq
+
+volumes:
+  operaiq-qdrant-storage:
+
+networks:
+  operaiq:
+    name: operaiq

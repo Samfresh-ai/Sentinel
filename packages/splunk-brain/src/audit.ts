@@ -3,7 +3,7 @@ import { createLogger } from "@sentinel/shared";
 import { createCollection, insertDocument } from "./kvstore.js";
 import { sendEvent } from "./hec.js";
 
-const logger = createLogger("sentinel-audit");
+const logger = createLogger("operaiq-audit");
 
 export const auditPhaseSchema = z.enum([
   "ASSESS",
@@ -64,7 +64,7 @@ async function persistAuditEntry(entry: Omit<AuditEntry, "_key">): Promise<void>
   await Promise.all([
     insertDocument("audit_log", entry, { orgId: entry.orgId }),
     sendEvent({
-      sourcetype: "sentinel:audit",
+      sourcetype: "operaiq:audit",
       event: {
         type: "audit_entry",
         ...entry
@@ -82,6 +82,6 @@ export async function writeAuditEntry(entry: Omit<AuditEntry, "_key">): Promise<
     });
     await persistAuditEntry(parsed);
   } catch (error: unknown) {
-    logger.warn({ error }, "Sentinel audit entry rejected");
+    logger.warn({ error }, "OperaIQ audit entry rejected");
   }
 }

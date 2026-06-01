@@ -1,31 +1,25 @@
-import { z } from "zod";
-import { getSplunkConfig, splunkHecRequest } from "./client.js";
-import type { SplunkHECEvent } from "./types.js";
+import { insertDocument } from "./kvstore.js";
+import type { QdrantMemoryEvent } from "./types.js";
 
-const hecResponseSchema = z.object({
-  text: z.string().optional(),
-  code: z.number().optional()
-}).passthrough();
-
-function normalizeEvent(event: SplunkHECEvent): SplunkHECEvent {
-  const config = getSplunkConfig();
+function normalizeEvent(event: QdrantMemoryEvent): Record<string, unknown> {
+  const createdAt = new Date((event.time ?? Date.now() / 1000) * 1000).toISOString();
+  const body = event.event;
   return {
-    time: event.time ?? Date.now() / 1000,
-    host: event.host ?? config.SPLUNK_HOST,
-    source: event.source ?? "sentinel",
-    sourcetype: event.sourcetype ?? "_json",
-    index: event.index ?? config.SPLUNK_INDEX,
-    ...(event.fields ? { fields: event.fields } : {}),
-    event: event.event
+    kind: typeof body.kind === "string" ? body.kind : "service_context",
+    sourcetype: event.sourcetype ?? "operaiq:event",
+    source: event.source ?? "operaiq",
+    host: event.host ?? "operaiq-api",
+    createdAt,
+    updatedAt: createdAt,
+    ...body
   };
 }
 
-export async function sendEvent(event: SplunkHECEvent | SplunkHECEvent[]): Promise<void> {
+export async function sendEvent(event: QdrantMemoryEvent | QdrantMemoryEvent[]): Promise<void> {
   const events = Array.isArray(event) ? event : [event];
   for (const item of events) {
-    const response = await splunkHecRequest(hecResponseSchema, normalizeEvent(item));
-    if (response.code !== undefined && response.code !== 0) {
-      throw new Error(`Splunk HEC rejected event: ${response.text ?? response.code}`);
-    }
+    const document = normalizeEvent(item);
+    const orgId = typeof document.orgId === "string" ? document.orgId : undefined;
+    await insertDocument("events", document, orgId ? { orgId } : undefined);
   }
 }

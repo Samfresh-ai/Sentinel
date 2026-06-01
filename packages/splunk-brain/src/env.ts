@@ -3,36 +3,45 @@ import { z } from "zod";
 
 loadRootEnv();
 
-const booleanEnv = z.preprocess((value) => {
-  if (typeof value !== "string") return value;
-  const normalized = value.trim().toLowerCase();
-  if (["false", "0", "no"].includes(normalized)) return false;
-  if (["true", "1", "yes"].includes(normalized)) return true;
-  return value;
-}, z.boolean());
+const optionalNonEmptyString = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional()
+);
 
-const splunkEnvSchema = z.object({
-  SPLUNK_HOST: z.string().min(1).default("localhost"),
-  SPLUNK_CLOUD_STACK_HOST: z.string().min(1).optional(),
-  SPLUNK_MGMT_URL: z.string().url().optional(),
-  SPLUNK_HEC_URL: z.string().url().optional(),
-  SPLUNK_MGMT_PORT: z.coerce.number().int().positive().default(8089),
-  SPLUNK_HEC_PORT: z.coerce.number().int().positive().default(8088),
-  SPLUNK_HEC_PROTOCOL: z.enum(["http", "https"]).default("https"),
-  SPLUNK_TLS_REJECT_UNAUTHORIZED: booleanEnv.default(true),
-  SPLUNK_CA_CERT: z.string().min(1).optional(),
-  SPLUNK_USERNAME: z.string().min(1),
-  SPLUNK_PASSWORD: z.string().min(1),
-  SPLUNK_HEC_TOKEN: z.string().min(1),
-  SPLUNK_GATEWAY_TOKEN: z.string().min(1).optional(),
-  SPLUNK_CF_ACCESS_CLIENT_ID: z.string().min(1).optional(),
-  SPLUNK_CF_ACCESS_CLIENT_SECRET: z.string().min(1).optional(),
-  SPLUNK_APP: z.string().min(1).default("sentinel"),
-  SPLUNK_INDEX: z.string().min(1).default("sentinel")
+const embeddingProviderSchema = z.enum(["nvidia", "openai"]);
+
+export const qdrantEnvSchema = z.object({
+  QDRANT_URL: z.string().url().default("http://localhost:6333"),
+  QDRANT_API_KEY: optionalNonEmptyString,
+  QDRANT_COLLECTION: z.string().min(1).default("operaiq_memory"),
+  OPERAIQ_ORG_ID: z.string().min(1).default("operaiq-local-org"),
+  OPERAIQ_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.82),
+  OPERAIQ_AUTO_ACT_LOW_RISK: z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) return true;
+    if (["false", "0", "no"].includes(normalized)) return false;
+    return value;
+  }, z.boolean().default(true)),
+  EMBEDDING_PROVIDER: embeddingProviderSchema.default("nvidia"),
+  NVIDIA_API_KEY: optionalNonEmptyString,
+  NVIDIA_BASE_URL: z.string().url().default("https://integrate.api.nvidia.com/v1"),
+  NVIDIA_EMBEDDING_MODEL: z.string().min(1).default("nvidia/nv-embedqa-e5-v5"),
+  OPENAI_API_KEY: optionalNonEmptyString,
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  OPENAI_EMBEDDING_MODEL: z.string().min(1).default("text-embedding-3-small")
 });
 
-export type SplunkEnv = z.infer<typeof splunkEnvSchema>;
+export type QdrantEnv = z.infer<typeof qdrantEnvSchema>;
+export type EmbeddingProvider = z.infer<typeof embeddingProviderSchema>;
 
-export function getSplunkEnv(): SplunkEnv {
-  return splunkEnvSchema.parse(process.env);
+export function getQdrantEnv(): QdrantEnv {
+  const parsed = qdrantEnvSchema.parse(process.env);
+  if (parsed.EMBEDDING_PROVIDER === "nvidia" && !parsed.NVIDIA_API_KEY) {
+    throw new Error("NVIDIA_API_KEY is required when EMBEDDING_PROVIDER=nvidia");
+  }
+  if (parsed.EMBEDDING_PROVIDER === "openai" && !parsed.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai");
+  }
+  return parsed;
 }

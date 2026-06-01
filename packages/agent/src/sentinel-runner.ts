@@ -8,7 +8,7 @@ import { sentinelGetRunbook } from "./tools/sentinel-get-runbook.js";
 import { sentinelGetServiceDependencyGraph } from "./tools/sentinel-get-service-dependency-graph.js";
 import { sentinelSearchSimilarIncidents } from "./tools/sentinel-search-similar-incidents.js";
 import { sentinelWritePostmortem } from "./tools/sentinel-write-postmortem.js";
-import { querySplunkLogs, type ServiceSignal } from "./tools/query-splunk-logs.js";
+import { queryQdrantMemory, type ServiceSignal } from "./tools/query-splunk-logs.js";
 import { invocationFailed } from "./tools/common.js";
 
 export type SentinelEventSink = (event: AgentEvent) => Promise<void>;
@@ -56,7 +56,7 @@ function recordFrom(value: unknown): Record<string, unknown> {
 }
 
 function messageFromError(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown Sentinel agent failure";
+  return error instanceof Error ? error.message : "Unknown OperaIQ agent failure";
 }
 
 async function auditedPhase<T>(
@@ -144,10 +144,10 @@ function actionFromCommand(command: string | null): "scale_service" | "restart_p
   return null;
 }
 
-function splunkSearchForAlert(alert: NormalizedAlert): string {
+function qdrantQueryForAlert(alert: NormalizedAlert): string {
   const symptomText = alert.symptoms.join(" ").toLowerCase();
   if (alert.incidentType === "sentinel_test_payment_redis_spike" || symptomText.includes("econnreset")) {
-    return "index=prod sourcetype=app service=payment | stats count by error_type";
+    return "payment-service Redis ECONNRESET connection pool exhausted checkout failures";
   }
 
   const service = alert.affectedServices[0] ?? "*";
@@ -157,7 +157,7 @@ function splunkSearchForAlert(alert: NormalizedAlert): string {
     .slice(0, 8)
     .map((term) => `"${term.replaceAll("\"", "\\\"")}"`);
   const expression = terms.length > 0 ? terms.join(" OR ") : `"${service}"`;
-  return `search index=sentinel (${expression} OR service=${service}) | head 25`;
+  return `${service} ${expression}`;
 }
 
 function statCount(results: Array<Record<string, unknown>>, key: string): number | null {
@@ -171,12 +171,12 @@ function statCount(results: Array<Record<string, unknown>>, key: string): number
   return null;
 }
 
-function investigateMessage(serviceName: string | undefined, spl: string, eventCount: number, results: Array<Record<string, unknown>>): string {
+function investigateMessage(serviceName: string | undefined, query: string, eventCount: number, results: Array<Record<string, unknown>>): string {
   const econnresetCount = statCount(results, "ECONNRESET");
   if (econnresetCount !== null) {
-    return `[INVESTIGATE] ${spl} -> ECONNRESET: ${econnresetCount} events in last 15 minutes.`;
+    return `[INVESTIGATE] ${query} -> ECONNRESET: ${econnresetCount} Qdrant memory signals.`;
   }
-  return `[INVESTIGATE] ${spl} -> ${eventCount} result${eventCount === 1 ? "" : "s"} for ${serviceName ?? "affected service"}.`;
+  return `[INVESTIGATE] ${query} -> ${eventCount} Qdrant result${eventCount === 1 ? "" : "s"} for ${serviceName ?? "affected service"}.`;
 }
 
 function remediationTarget(action: string | null, defaultService: string | undefined, graph: Awaited<ReturnType<typeof sentinelGetServiceDependencyGraph>>): string {
@@ -188,7 +188,7 @@ function remediationTarget(action: string | null, defaultService: string | undef
 
 function maybeForceCrash(phase: AuditPhase, override?: string): void {
   if (((override ?? process.env.SENTINEL_FORCE_CRASH_PHASE ?? "")).toUpperCase() === phase) {
-    throw new Error(`Forced Sentinel crash at ${phase}`);
+    throw new Error(`Forced OperaIQ crash at ${phase}`);
   }
 }
 
@@ -285,7 +285,7 @@ function adjustedVerifyCount(input: {
   return input.actualCount;
 }
 
-function splunkEpochSeconds(date: Date, backoffMs = 0): string {
+function qdrantSinceSeconds(date: Date, backoffMs = 0): string {
   return String(Math.floor(Math.max(0, date.getTime() - backoffMs) / 1000));
 }
 
@@ -303,7 +303,7 @@ async function writeEscalationPostmortem(input: {
   title: string;
   severity: string;
   symptoms: string[];
-  timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>;
+  timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "sentinel" | "human" }>;
   rootCauseSuspected: string | null;
   remediationsTried: string[];
   verifyResults: Array<{ timestamp: string; errorCount: number; passed: boolean }>;
@@ -315,21 +315,21 @@ async function writeEscalationPostmortem(input: {
     orgId: input.orgId,
     incidentId: input.incidentId,
     title: `Escalation: ${input.title}`,
-    summary: "Sentinel stopped autonomous remediation and escalated to on-call with investigation context.",
+    summary: "OperaIQ stopped autonomous remediation and escalated to on-call with investigation context.",
     timeline: input.timeline,
     rootCause: input.rootCauseSuspected ?? "unknown - autonomous confidence below escalation threshold",
     contributingFactors: ["Autonomous remediation did not clear the verification threshold."],
     remediationTaken: input.remediationsTried,
     preventionActions: ["Human on-call review required before further automated action."],
-    lessonLearned: "Sentinel should stop when confidence and verification evidence do not support more autonomous action.",
-    generatedBy: "sentinel",
+    lessonLearned: "OperaIQ should stop when confidence and verification evidence do not support more autonomous action.",
+    generatedBy: "operaiq",
     type: "escalation",
     escalationContext: input.escalationContext,
     createdAt
   }, { orgId: input.orgId });
 
   await sendEvent({
-    sourcetype: "sentinel:postmortem",
+    sourcetype: "operaiq:postmortem",
     event: {
       type: "escalation",
       orgId: input.orgId,
@@ -341,7 +341,7 @@ async function writeEscalationPostmortem(input: {
       remediationSteps: input.remediationsTried,
       verifyResults: input.verifyResults,
       bestSimilarityScore: input.bestSimilarityScore,
-      generatedBy: "sentinel",
+      generatedBy: "operaiq",
       createdAt
     }
   });
@@ -394,20 +394,20 @@ async function writeDeadLetter(input: {
 }
 
 export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink): Promise<RunSentinelAgentResult> {
-  assertProductionSafeRuntime("Sentinel agent");
+  assertProductionSafeRuntime("OperaIQ agent");
   const parsed = runSentinelAgentInputSchema.parse(input);
   const rawInput = typeof input === "object" && input !== null ? (input as { remediationWaitMs?: unknown; verifyFailsBeforePass?: unknown; forceCrashPhase?: unknown }) : {};
   const perIncidentRemediationWaitMs = typeof rawInput.remediationWaitMs === "number" ? rawInput.remediationWaitMs : undefined;
   const verifyFailsBeforePass = typeof rawInput.verifyFailsBeforePass === "number" ? rawInput.verifyFailsBeforePass : undefined;
   const forceCrashPhase = typeof rawInput.forceCrashPhase === "string" ? rawInput.forceCrashPhase : undefined;
   const toolsCalled: string[] = [];
-  const timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }> = [];
+  const timeline: Array<{ timestamp: string; event: string; actor: "operaiq" | "sentinel" | "human" }> = [];
   const addTimeline = (event: string): void => {
-    timeline.push({ timestamp: new Date().toISOString(), event, actor: "sentinel" });
+    timeline.push({ timestamp: new Date().toISOString(), event, actor: "operaiq" });
   };
 
   process.env.SENTINEL_MODE = "true";
-  process.env.AGENT_NAME = "Sentinel";
+  process.env.AGENT_NAME = "OperaIQ";
 
   try {
     let currentSeverity = parsed.alert.severity;
@@ -437,10 +437,10 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           sink,
           parsed.incidentId,
           "ASSESS",
-          `Sentinel parsed ${parsed.alert.severity} alert for ${parsed.alert.affectedServices.join(", ")} with ${parsed.alert.symptoms.length} symptoms.`,
+          `OperaIQ parsed ${parsed.alert.severity} alert for ${parsed.alert.affectedServices.join(", ")} with ${parsed.alert.symptoms.length} symptoms.`,
           { alert: parsed.alert }
         );
-        addTimeline(`Sentinel assessed alert: ${parsed.alert.title}`);
+        addTimeline(`OperaIQ assessed alert: ${parsed.alert.title}`);
         return { status: "in_progress" };
       },
       recordFrom
@@ -462,10 +462,10 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           sink,
           parsed.incidentId,
           "REMEMBER",
-          `Searched Splunk incident memory and found ${result.length} similar matches${result[0] ? `. Best match: ${result[0].title} (${Math.round(result[0].similarity * 100)}% match).` : "."}`,
+          `Searched Qdrant incident memory and found ${result.length} similar matches${result[0] ? `. Best match: ${result[0].title} (${Math.round(result[0].similarity * 100)}% match).` : "."}`,
           { similarIncidents: result }
         );
-        addTimeline(`Found ${result.length} similar Splunk-backed incidents`);
+        addTimeline(`Found ${result.length} similar Qdrant-backed incidents`);
         return result;
       },
       (result) => ({ similarIncidents: result }),
@@ -506,10 +506,10 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           "MAP",
           result
             ? `[MAP] ${serviceName} blast radius: ${services.length} services\n ${services.join(", ")}${upgrade ? `\n Alert was ${parsed.alert.severity}. ${upgrade.reason}.` : ""}`
-            : `${serviceName} was not found in the Sentinel service graph.`,
+            : `${serviceName} was not found in the OperaIQ service graph.`,
           result ? { graph: result, services, severityUpgrade: upgrade } : { services, severityUpgrade: upgrade }
         );
-        addTimeline(`Mapped Sentinel dependency graph for ${serviceName}`);
+        addTimeline(`Mapped OperaIQ dependency graph for ${serviceName}`);
         if (upgrade) addTimeline(upgrade.reason);
         return result;
       },
@@ -520,6 +520,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
     const investigateInput = {
       services: blastRadius,
       symptoms: parsed.alert.symptoms,
+      orgId: parsed.orgId,
       timeRange: { earliest: "-15m", latest: "now" },
       description: `Checking ${blastRadius.length} services in the ${serviceName} blast radius.`
     };
@@ -528,12 +529,12 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         orgId: parsed.orgId,
         incidentId: parsed.incidentId,
         phase: "INVESTIGATE",
-        toolCalled: "query_splunk_logs",
+        toolCalled: "query_qdrant_memory",
         input: investigateInput
       },
       async () => {
-        toolsCalled.push("query_splunk_logs");
-        const result = await querySplunkLogs(investigateInput);
+        toolsCalled.push("query_qdrant_memory");
+        const result = await queryQdrantMemory(investigateInput);
         const signals = result.serviceSignals ?? [];
         const rootCauseCandidate = rootCauseFromSignals(signals, graph);
         await emit(
@@ -542,8 +543,8 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           "INVESTIGATE",
           signals.length > 0
             ? correlationMessage(signals, rootCauseCandidate)
-            : investigateMessage(serviceName, result.spl, result.eventCount, result.results),
-          { spl: result.spl, eventCount: result.eventCount, serviceSignals: signals, rootCauseCandidate }
+            : investigateMessage(serviceName, result.query, result.eventCount, result.results),
+          { query: result.query, eventCount: result.eventCount, serviceSignals: signals, rootCauseCandidate }
         );
         const originalSignal = signals.find((signal) => signal.service === (rootCauseCandidate ?? serviceName)) ?? signals[0];
         await updateSentinelIncident(parsed.incidentId, parsed.orgId, {
@@ -551,7 +552,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           correlationReport: signals,
           rootCauseCandidate
         });
-        addTimeline(`Ran live SPL investigation across ${signals.length || 1} service signals`);
+        addTimeline(`Retrieved Qdrant investigation context across ${signals.length || 1} service signals`);
         return result;
       },
       recordFrom
@@ -560,7 +561,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
     const rootCauseCandidate = rootCauseFromSignals(serviceSignals, graph);
     const originalSignal = serviceSignals.find((signal) => signal.service === (rootCauseCandidate ?? serviceName)) ?? serviceSignals[0];
     const originalErrorCount = Math.max(0, originalSignal?.errorCount ?? liveLogs.eventCount);
-    const verifySpl = originalSignal?.spl ?? splunkSearchForAlert(parsed.alert);
+    const verifyQuery = originalSignal?.query ?? qdrantQueryForAlert(parsed.alert);
 
     const runbookInput = {
       incidentDescription: `${parsed.alert.title}\nRoot cause candidate: ${rootCauseCandidate ?? "unknown"}\n${parsed.alert.symptoms.join("\n")}`,
@@ -584,7 +585,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           parsed.incidentId,
           "RETRIEVE",
           result
-            ? `Selected runbook "${result.title}" with ${result.steps.length} steps${result.generated ? " and saved it in Splunk KV Store." : "."}`
+            ? `Selected runbook "${result.title}" with ${result.steps.length} steps${result.generated ? " and saved it in Qdrant memory." : "."}`
             : "No runbook was available.",
           result ? { runbook: result } : undefined
         );
@@ -620,8 +621,8 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
             symptoms: parsed.alert.symptoms.join(", "),
             orgId: parsed.orgId,
             reasoning: similarIncidents[0]
-              ? `Sentinel connected this to ${similarIncidents[0].title} at ${Math.round(bestSimilarityScore * 100)} percent similarity and saw ${liveLogs.eventCount} correlated Splunk errors.`
-              : `Sentinel saw ${liveLogs.eventCount} correlated Splunk errors and no high-confidence prior incident.`,
+              ? `OperaIQ connected this to ${similarIncidents[0].title} at ${Math.round(bestSimilarityScore * 100)} percent similarity and saw ${liveLogs.eventCount} correlated Qdrant signals.`
+              : `OperaIQ saw ${liveLogs.eventCount} correlated Qdrant signals and no high-confidence prior incident.`,
             incidentId: parsed.incidentId
           }
         };
@@ -647,7 +648,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
               parsed.incidentId,
               "ACT",
               remediationResult.requiresHumanApproval
-                ? `${action} requires human approval; Sentinel notified the service owners and stopped automatic action.`
+                ? `${action} requires human approval; OperaIQ notified the service owners and stopped automatic action.`
                 : `${action} on ${targetService} completed in ${elapsedSeconds}s with success=${remediationResult.success}.`,
               { result: remediationResult, elapsedSeconds }
             );
@@ -665,14 +666,14 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         verifyResults.push(failedVerify);
         await updateSentinelIncident(parsed.incidentId, parsed.orgId, { remediationAttempts, verifyResults });
       } else {
-        const verifyFrom = splunkEpochSeconds(result.executedAt, 5_000);
-        const verifyInput = { spl: verifySpl, timeRange: { earliest: verifyFrom, latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
+        const verifyFrom = qdrantSinceSeconds(result.executedAt, 5_000);
+        const verifyInput = { query: verifyQuery, orgId: parsed.orgId, timeRange: { earliest: verifyFrom, latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
         const verifyResult = await auditedPhase(
           {
             orgId: parsed.orgId,
             incidentId: parsed.incidentId,
             phase: "VERIFY",
-            toolCalled: "query_splunk_logs",
+            toolCalled: "query_qdrant_memory",
             input: verifyInput
           },
           async () => {
@@ -685,9 +686,10 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
             } else {
               await emit(sink, parsed.incidentId, "VERIFY", `[VERIFY] Re-checking ${targetService} immediately after remediation...`, { waitMs });
             }
-            toolsCalled.push("query_splunk_logs");
-            const latest = await querySplunkLogs({
-              spl: verifySpl,
+            toolsCalled.push("query_qdrant_memory");
+            const latest = await queryQdrantMemory({
+              query: verifyQuery,
+              orgId: parsed.orgId,
               timeRange: { earliest: verifyFrom, latest: "now" },
               description: `Verifying whether ${targetService} cleared after ${action}.`
             });
@@ -743,7 +745,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
               investigationUrl
             };
             const message = [
-              `🔴 Sentinel escalating — ${rootCauseCandidate ?? serviceName ?? "unknown-service"} ${currentSeverity}`,
+              `OperaIQ escalating - ${rootCauseCandidate ?? serviceName ?? "unknown-service"} ${currentSeverity}`,
               `Similarity confidence: ${Math.round(bestSimilarityScore * 100)}%${bestSimilarityScore < 0.4 ? " (below threshold)" : ""}`,
               `Tried: ${remediationsTried.join(", ") || "none"}`,
               `None resolved. Full investigation: ${investigationUrl}`,
@@ -758,7 +760,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
                 symptoms: parsed.alert.symptoms.join(", "),
                 orgId: parsed.orgId,
                 incidentId: parsed.incidentId,
-                reasoning: "Sentinel escalation threshold reached.",
+                reasoning: "OperaIQ escalation threshold reached.",
                 escalationMessage: message,
                 escalationContextJson: JSON.stringify(escalationContext)
               }
@@ -801,7 +803,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
     }
 
     if (!resolved && remediationResults.length > 0) {
-      throw new Error("Sentinel exhausted remediation steps before verification passed");
+      throw new Error("OperaIQ exhausted remediation steps before verification passed");
     }
 
     const postmortem = await auditedPhase(
@@ -832,7 +834,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           remediationTaken: remediationResults.map((item) => JSON.stringify(item)),
           lessonLearned: conclusion.lessonLearned
         });
-        await emit(sink, parsed.incidentId, "CLOSE", `Wrote Sentinel post-mortem ${result.postmortemId} to Splunk KV Store and HEC.`, {
+        await emit(sink, parsed.incidentId, "CLOSE", `Wrote OperaIQ post-mortem ${result.postmortemId} to Qdrant memory.`, {
           postmortem: result
         });
         return result;
@@ -848,7 +850,7 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
       sink,
       parsed.incidentId,
       "ERROR",
-      error instanceof Error ? error.message : "Unknown Sentinel agent failure",
+      error instanceof Error ? error.message : "Unknown OperaIQ agent failure",
       {}
     );
     return { incidentId: parsed.incidentId, toolsCalled, status: "failed" };
