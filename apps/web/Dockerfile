@@ -25,6 +25,8 @@ RUN pnpm --filter @sentinel/web build
 
 FROM node:22-slim AS runner
 ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=10000
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
@@ -32,5 +34,5 @@ RUN apt-get update \
 COPY --from=build /app/apps/web/.next/standalone ./
 COPY --from=build /app/apps/web/.next/static apps/web/.next/static
 COPY --from=build /app/apps/web/public apps/web/public
-EXPOSE 3000
+EXPOSE 10000
 CMD ["node", "apps/web/server.js"]
