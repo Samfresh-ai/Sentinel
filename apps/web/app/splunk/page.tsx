@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { fetchQdrantOverview, isUnauthorizedError, storedToken, type QdrantOverview } from "@/lib/api";
+import { fetchSplunkOverview, isUnauthorizedError, storedToken, type SplunkOverview } from "@/lib/api";
 
 function timeAgo(value: string): string {
   const diffMs = Date.now() - new Date(value).getTime();
@@ -35,9 +35,9 @@ function MiniBar({ value, max, tone = "bg-active" }: { value: number; max: numbe
   );
 }
 
-export default function QdrantOverviewPage() {
+export default function SplunkOverviewPage() {
   const router = useRouter();
-  const [overview, setOverview] = useState<QdrantOverview | null>(null);
+  const [overview, setOverview] = useState<SplunkOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,14 +48,14 @@ export default function QdrantOverviewPage() {
     let cancelled = false;
     async function load(): Promise<void> {
       try {
-        const next = await fetchQdrantOverview();
+        const next = await fetchSplunkOverview();
         if (!cancelled) {
           setOverview(next);
           setError(null);
         }
       } catch (loadError: unknown) {
         if (isUnauthorizedError(loadError)) return;
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Unable to load Qdrant overview");
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Unable to load Splunk overview");
       }
     }
     void load();
@@ -76,18 +76,18 @@ export default function QdrantOverviewPage() {
     <div className="min-w-0 space-y-4">
       <section className="flex flex-col justify-between gap-3 border-b border-border pb-4 lg:flex-row lg:items-end">
         <div>
-          <h1 className="font-mono text-[16px] uppercase tracking-[0.08em] text-foreground">Qdrant Operations</h1>
-          <p className="mt-1 text-[13px] text-muted">Vector memory, audit trail, service context, and OperaIQ agent decisions inside the product shell.</p>
+          <h1 className="font-mono text-[16px] uppercase tracking-[0.08em] text-foreground">Splunk Operations</h1>
+          <p className="mt-1 text-[13px] text-muted">Splunk KV Store memory, HEC audit trail, SPL health, and Sentinel agent decisions inside the product shell.</p>
         </div>
         <div className="grid gap-2 font-mono text-[11px] uppercase tracking-[0.06em] text-muted sm:grid-cols-3 lg:min-w-[520px]">
           <div className="border border-border bg-panel px-3 py-2">
-            Surface <span className="block pt-1 text-foreground">/qdrant</span>
+            Surface <span className="block pt-1 text-foreground">/splunk</span>
           </div>
           <div className="border border-border bg-panel px-3 py-2">
-            Source <span className="block pt-1 text-accent">operaiq_memory</span>
+            Source <span className="block pt-1 text-accent">SPL + KV + HEC</span>
           </div>
           <div className="border border-border bg-panel px-3 py-2">
-            Native view <span className="block truncate pt-1 text-muted-deep">{overview?.nativeDashboardUrl ? "available" : "loading"}</span>
+            Native view <span className="block truncate pt-1 text-muted-deep">{overview?.nativeDashboardUrl ? "mirrored in app" : "loading"}</span>
           </div>
         </div>
       </section>
@@ -99,7 +99,7 @@ export default function QdrantOverviewPage() {
           <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Active incidents</div>
           <div className="p-3">
             <div className="font-mono text-[42px] leading-none text-foreground">{overview?.activeIncidents ?? "--"}</div>
-            <div className="mt-2 text-[13px] text-muted">Open or in-progress OperaIQ incidents.</div>
+            <div className="mt-2 text-[13px] text-muted">Open or in-progress Sentinel incidents.</div>
           </div>
         </div>
 
@@ -107,7 +107,7 @@ export default function QdrantOverviewPage() {
           <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Brain size</div>
           <div className="p-3">
             <div className="font-mono text-[42px] leading-none text-accent">{overview?.brainSize ?? "--"}</div>
-            <div className="mt-2 text-[13px] text-muted">Resolved incidents available as Qdrant memory.</div>
+            <div className="mt-2 text-[13px] text-muted">Resolved incidents available as operational memory.</div>
           </div>
         </div>
       </section>
@@ -184,7 +184,7 @@ export default function QdrantOverviewPage() {
         </div>
 
         <div className="border border-border bg-panel">
-          <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Service context</div>
+          <div className="border-b border-border px-3 py-2 font-mono text-[12px] uppercase tracking-[0.06em] text-muted">Service health - prod logs</div>
           <div className="space-y-3 p-3">
             {(overview?.serviceHealth ?? []).map((item) => (
               <div key={item.service} className="space-y-2">
@@ -198,7 +198,7 @@ export default function QdrantOverviewPage() {
                 </div>
               </div>
             ))}
-            {(overview?.serviceHealth ?? []).length === 0 ? <div className="font-mono text-[12px] text-muted">No service context indexed yet.</div> : null}
+            {(overview?.serviceHealth ?? []).length === 0 ? <div className="font-mono text-[12px] text-muted">No prod log events in the last 15 minutes.</div> : null}
           </div>
         </div>
       </section>

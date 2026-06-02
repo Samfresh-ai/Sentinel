@@ -74,7 +74,7 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
     violations.push("SENTINEL_LOCAL_VERIFY=true records remediation instead of dispatching real action");
   }
   if (isTestTimingMode(env)) {
-    violations.push("SENTINEL_TEST_REMEDIATION_WAIT_MS is set and can alter OperaIQ verification timing");
+    violations.push("SENTINEL_TEST_REMEDIATION_WAIT_MS is set and can alter Sentinel verification timing");
   }
   if (envValue(env, "SENTINEL_AI_PROVIDER").toLowerCase() === "offline") {
     violations.push("SENTINEL_AI_PROVIDER=offline is deterministic test reasoning, not production reasoning");
@@ -106,22 +106,27 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   }
   const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
   if (!publicAppUrl || isLocalUrl(publicAppUrl)) {
-    violations.push("PUBLIC_APP_URL must be the public OperaIQ web URL");
+    violations.push("PUBLIC_APP_URL must be the public Sentinel web URL");
   }
   const apiUrl = envValue(env, "API_PUBLIC_URL") || envValue(env, "NEXT_PUBLIC_API_URL");
   if (!apiUrl || isLocalUrl(apiUrl)) {
-    violations.push("API_PUBLIC_URL or NEXT_PUBLIC_API_URL must be the public OperaIQ API URL");
+    violations.push("API_PUBLIC_URL or NEXT_PUBLIC_API_URL must be the public Sentinel API URL");
   }
-  const qdrantUrl = envValue(env, "QDRANT_URL");
-  if (!qdrantUrl || isLocalUrl(qdrantUrl)) {
-    violations.push("QDRANT_URL must point to a reachable non-local Qdrant endpoint in production");
+  const splunkHost = envValue(env, "SPLUNK_HOST");
+  const splunkCloudStackHost = envValue(env, "SPLUNK_CLOUD_STACK_HOST");
+  const splunkMgmtEndpoint = envValue(env, "SPLUNK_MGMT_URL") || splunkCloudStackHost || splunkHost;
+  const splunkHecEndpoint = envValue(env, "SPLUNK_HEC_URL") || splunkCloudStackHost || splunkHost;
+  if (isLocalEndpoint(splunkMgmtEndpoint)) {
+    violations.push("SPLUNK_MGMT_URL or SPLUNK_HOST must point to a reachable non-local Splunk management endpoint in production");
   }
-  const embeddingProvider = envValue(env, "EMBEDDING_PROVIDER").toLowerCase() || "nvidia";
-  if (embeddingProvider === "nvidia" && !hasEnv(env, "NVIDIA_API_KEY")) {
-    violations.push("NVIDIA_API_KEY is required when production embeddings use NVIDIA");
+  if (isLocalEndpoint(splunkHecEndpoint)) {
+    violations.push("SPLUNK_HEC_URL or SPLUNK_HOST must point to a reachable non-local Splunk HEC endpoint in production");
   }
-  if (embeddingProvider === "openai" && !hasEnv(env, "OPENAI_API_KEY")) {
-    violations.push("OPENAI_API_KEY is required when production embeddings use OpenAI");
+  for (const key of ["SPLUNK_USERNAME", "SPLUNK_PASSWORD", "SPLUNK_HEC_TOKEN"]) {
+    if (!hasEnv(env, key)) violations.push(`${key} is required for production Splunk access`);
+  }
+  if (splunkCloudStackHost && (hasEnv(env, "SPLUNK_GATEWAY_TOKEN") || hasEnv(env, "SPLUNK_CF_ACCESS_CLIENT_ID") || hasEnv(env, "SPLUNK_CF_ACCESS_CLIENT_SECRET"))) {
+    violations.push("SPLUNK_CLOUD_STACK_HOST should not be combined with local tunnel gateway or Cloudflare Access Splunk variables");
   }
   return violations;
 }

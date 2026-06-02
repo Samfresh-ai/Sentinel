@@ -126,10 +126,10 @@ export default function IncidentFeedPage() {
 
       <section className="grid gap-3 border border-border bg-panel p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
         <div className="min-w-0">
-          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-deep">OperaIQ webhook</div>
+          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-deep">Splunk webhook</div>
           <h2 className="mt-1 font-mono text-[14px] uppercase tracking-[0.06em] text-foreground">Alert Action URL for {orgSummary?.orgName ?? "this org"}</h2>
           <p className="mt-1 max-w-[760px] text-[13px] text-muted">
-            Generate a fresh URL here and send incident alerts to OperaIQ. The secret is shown only when generated, and the previous webhook secret stops working.
+            Generate a fresh URL here and paste it into the Splunk saved search webhook action. The secret is shown only when generated, and the previous webhook secret stops working.
           </p>
           <div className="mt-3 break-all border border-border bg-background p-3 font-mono text-[12px] text-active">
             {webhookUrl || orgSummary?.webhookUrl || "Loading webhook endpoint"}

@@ -8,16 +8,10 @@ export function createLogger(name: string) {
       paths: [
         "SPLUNK_PASSWORD",
         "SPLUNK_HEC_TOKEN",
-        "QDRANT_API_KEY",
-        "NVIDIA_API_KEY",
-        "OPENAI_API_KEY",
         "SLACK_BOT_TOKEN",
         "SLACK_SIGNING_SECRET",
         "*.SPLUNK_PASSWORD",
         "*.SPLUNK_HEC_TOKEN",
-        "*.QDRANT_API_KEY",
-        "*.NVIDIA_API_KEY",
-        "*.OPENAI_API_KEY",
         "*.SLACK_BOT_TOKEN",
         "*.SLACK_SIGNING_SECRET"
       ],

@@ -34,8 +34,8 @@ const agentEnvSchema = z.object({
   WEBHOOK_SECRET: optionalNonEmptyString,
   AGENT_TOOL_SECRET: optionalNonEmptyString,
   SENTINEL_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
-  CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("operaiq-remediate"),
-  AGENT_NAME: z.string().min(1).default("OperaIQ")
+  CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("sentinel-remediate"),
+  AGENT_NAME: z.string().min(1).default("Sentinel")
 });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;

@@ -1,46 +1,43 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { getQdrantConfig, qdrantRequest } from "./client.js";
-import { ensureMemoryCollection } from "./collections.js";
-import { embedPassage } from "./embedding.js";
-import { qdrantRecordSchema, type QdrantRecord } from "./types.js";
+import { getSplunkConfig, splunkRestRequest } from "./client.js";
+import { splunkRecordSchema, type SplunkRecord } from "./types.js";
 
-const pointSchema = z.object({
-  id: z.union([z.string(), z.number()]),
-  payload: qdrantRecordSchema.default({})
-}).passthrough();
-
-const scrollResponseSchema = z.object({
-  result: z.object({
-    points: z.array(pointSchema).default([])
-  }).passthrough()
-}).passthrough();
-
+const collectionListSchema = z.object({ entry: z.array(z.object({ name: z.string() }).passthrough()).default([]) }).passthrough();
+const recordArraySchema = z.array(splunkRecordSchema);
+const singleRecordSchema = splunkRecordSchema;
+const insertResponseSchema = z.object({ _key: z.string() }).passthrough();
 const ORG_SCOPED_COLLECTIONS = new Set([
   "incidents",
   "services",
-  "projects",
   "service_runtime_configs",
   "runbooks",
   "patterns",
-  "pattern_alerts",
   "postmortems",
   "audit_log",
-  "events",
-  "log_batches",
-  "remediation_executions",
-  "dead_letter"
+  "remediation_executions"
 ]);
-
-let storageReady: Promise<void> | null = null;
 
 export interface KvStoreOptions {
   orgId: string;
 }
 
+function appPath(suffix: string): string {
+  const app = encodeURIComponent(getSplunkConfig().SPLUNK_APP);
+  return `/servicesNS/nobody/${app}/storage/collections/${suffix}`;
+}
+
+function collectionPath(collection: string): string {
+  return appPath(`data/${encodeURIComponent(collection)}`);
+}
+
+function configPath(): string {
+  return appPath("config");
+}
+
 function normalizeDocument<T>(doc: T): Record<string, unknown> {
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
-    throw new Error("OperaIQ memory documents must be JSON objects");
+    throw new Error("Splunk KV Store documents must be JSON objects");
   }
   return doc as Record<string, unknown>;
 }
@@ -52,7 +49,7 @@ function scoped(collection: string): boolean {
 function requireOrgId(collection: string, orgId?: string): string {
   if (!scoped(collection)) return orgId ?? "";
   if (!orgId || orgId.trim().length === 0) {
-    throw new Error(`orgId is required for OperaIQ memory collection ${collection}`);
+    throw new Error(`orgId is required for Splunk KV Store collection ${collection}`);
   }
   return orgId;
 }
@@ -62,7 +59,7 @@ function documentOrgId(collection: string, document: Record<string, unknown>, op
   const orgId = explicit ?? options?.orgId;
   const required = requireOrgId(collection, orgId);
   if (explicit && options?.orgId && explicit !== options.orgId) {
-    throw new Error(`orgId mismatch for OperaIQ memory collection ${collection}`);
+    throw new Error(`orgId mismatch for Splunk KV Store collection ${collection}`);
   }
   return required;
 }
@@ -72,135 +69,61 @@ function scopedFilter(collection: string, filter: Record<string, unknown>, optio
   return { ...filter, orgId: requireOrgId(collection, options?.orgId) };
 }
 
-function kindForCollection(collection: string): string {
-  if (collection === "incidents") return "incident_memory";
-  if (collection === "runbooks") return "runbook";
-  if (collection === "postmortems") return "postmortem";
-  if (collection === "events") return "event";
-  if (collection === "log_batches") return "event";
-  if (collection === "services" || collection === "service_runtime_configs" || collection === "patterns") return "service_context";
-  if (collection === "projects" || collection === "pattern_alerts") return "service_context";
-  return "service_context";
-}
-
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
-  if (typeof value === "string") return [value];
-  return [];
-}
-
-function memoryText(collection: string, doc: Record<string, unknown>): string {
-  const fields = [
-    collection,
-    doc.kind,
-    doc.title,
-    doc.summary,
-    doc.message,
-    doc.errorName,
-    doc.stack,
-    doc.fingerprint,
-    doc.traceId,
-    doc.projectName,
-    doc.incidentType,
-    doc.service,
-    doc.name,
-    doc.severity,
-    doc.rootCause,
-    doc.resolution,
-    doc.lessonLearned,
-    doc.successCriteria,
-    ...stringList(doc.symptoms),
-    ...stringList(doc.affectedServices),
-    ...stringList(doc.applicableServices),
-    ...stringList(doc.remediationSteps),
-    ...stringList(doc.remediationTaken),
-    ...stringList(doc.preventionActions),
-    ...(Array.isArray(doc.steps)
-      ? doc.steps.flatMap((step) => {
-          if (typeof step !== "object" || step === null || Array.isArray(step)) return [];
-          const record = step as Record<string, unknown>;
-          return [record.action, record.command];
-        })
-      : [])
-  ];
-  return fields.filter((value): value is string => typeof value === "string" && value.trim().length > 0).join("\n");
-}
-
-function pointIdFor(collection: string, key: string): string {
-  const hex = crypto.createHash("sha256").update(`${collection}:${key}`).digest("hex");
-  const variant = ((Number.parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
-}
-
-function qdrantFilter(filter: Record<string, unknown>): Record<string, unknown> {
-  const must: Array<{ key: string; match: Record<string, unknown> }> = [];
-  for (const [key, value] of Object.entries(filter)) {
-    if (value === undefined) continue;
-    if (typeof value === "object" && value !== null && !Array.isArray(value) && "$in" in value) {
-      const values = (value as { $in?: unknown }).$in;
-      if (Array.isArray(values)) must.push({ key, match: { any: values } });
-      continue;
-    }
-    must.push({ key, match: { value } });
-  }
-  return must.length > 0 ? { must } : {};
-}
-
-async function upsertMemoryDocument(collection: string, document: Record<string, unknown>): Promise<void> {
-  const vector = await embedPassage(memoryText(collection, document));
-  await ensureMemoryCollection(vector.length);
-  const config = getQdrantConfig();
-  await qdrantRequest(z.record(z.unknown()), {
-    method: "PUT",
-    path: `/collections/${encodeURIComponent(config.QDRANT_COLLECTION)}/points`,
-    query: { wait: true },
-    json: {
-      points: [
-        {
-          id: pointIdFor(collection, String(document._key)),
-          vector,
-          payload: document
-        }
-      ]
-    }
-  });
-}
-
-async function ensureStorageReady(): Promise<void> {
-  storageReady ??= embedPassage("OperaIQ Qdrant memory collection bootstrap").then((vector) => ensureMemoryCollection(vector.length));
-  return storageReady;
-}
-
 export function createKvKey(): string {
   return crypto.randomBytes(12).toString("hex");
 }
 
-export async function createCollection(_name: string, _fields: Record<string, string> = {}): Promise<void> {
-  await ensureStorageReady();
+export async function createCollection(name: string, fields: Record<string, string> = {}): Promise<void> {
+  const current = await splunkRestRequest(collectionListSchema, {
+    path: configPath(),
+    query: { output_mode: "json", count: 0 }
+  }).catch(() => ({ entry: [] }));
+  if ((current.entry ?? []).some((entry) => entry.name === name)) return;
+
+  await splunkRestRequest(z.record(z.unknown()).default({}), {
+    method: "POST",
+    path: configPath(),
+    form: {
+      name,
+      output_mode: "json",
+      ...Object.fromEntries(Object.entries(fields).map(([field, type]) => [`field.${field}`, type]))
+    }
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("409") && message.includes("already exists")) return {};
+    throw error;
+  });
 }
 
 export async function insertDocument<T>(collection: string, doc: T, options?: KvStoreOptions): Promise<{ _key: string }> {
   const document = normalizeDocument(doc);
   const orgId = documentOrgId(collection, document, options);
-  const now = new Date().toISOString();
-  const key = typeof document._key === "string" ? document._key : createKvKey();
   const withKey = {
-    _key: key,
-    kind: kindForCollection(collection),
-    collection,
-    createdAt: typeof document.createdAt === "string" ? document.createdAt : now,
-    updatedAt: typeof document.updatedAt === "string" ? document.updatedAt : now,
+    _key: typeof document._key === "string" ? document._key : createKvKey(),
     ...document,
     ...(scoped(collection) ? { orgId } : {})
   };
-  await upsertMemoryDocument(collection, withKey);
-  return { _key: key };
+  const result = await splunkRestRequest(insertResponseSchema, {
+    method: "POST",
+    path: collectionPath(collection),
+    query: { output_mode: "json" },
+    json: withKey
+  });
+  return { _key: result._key };
 }
 
 export async function getDocument<T>(collection: string, key: string, options?: KvStoreOptions): Promise<T | null> {
   requireOrgId(collection, options?.orgId);
-  const docs = await queryDocuments<QdrantRecord>(collection, { _key: key }, 1, options);
-  return (docs[0] ?? null) as T | null;
+  const result = await splunkRestRequest(singleRecordSchema, {
+    path: `${collectionPath(collection)}/${encodeURIComponent(key)}`,
+    query: { output_mode: "json" }
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("404")) return null;
+    throw error;
+  });
+  if (result && scoped(collection) && result.orgId !== options?.orgId) return null;
+  return result as T | null;
 }
 
 export async function queryDocuments<T>(
@@ -209,20 +132,16 @@ export async function queryDocuments<T>(
   limit = 100,
   options?: KvStoreOptions
 ): Promise<T[]> {
-  await ensureStorageReady();
-  const config = getQdrantConfig();
-  const payloadFilter = qdrantFilter({ collection, ...scopedFilter(collection, filter, options) });
-  const response = await qdrantRequest(scrollResponseSchema, {
-    method: "POST",
-    path: `/collections/${encodeURIComponent(config.QDRANT_COLLECTION)}/points/scroll`,
-    json: {
-      filter: payloadFilter,
-      limit,
-      with_payload: true,
-      with_vectors: false
+  const query = scopedFilter(collection, filter, options);
+  const docs = await splunkRestRequest(recordArraySchema, {
+    path: collectionPath(collection),
+    query: {
+      output_mode: "json",
+      query: JSON.stringify(query),
+      count: limit
     }
   });
-  return (response.result.points ?? []).map((point) => point.payload as T);
+  return docs as T[];
 }
 
 export async function queryAllDocuments<T>(
@@ -230,37 +149,33 @@ export async function queryAllDocuments<T>(
   filter: Record<string, unknown>,
   limit = 100
 ): Promise<T[]> {
-  await ensureStorageReady();
-  const config = getQdrantConfig();
-  const response = await qdrantRequest(scrollResponseSchema, {
-    method: "POST",
-    path: `/collections/${encodeURIComponent(config.QDRANT_COLLECTION)}/points/scroll`,
-    json: {
-      filter: qdrantFilter({ collection, ...filter }),
-      limit,
-      with_payload: true,
-      with_vectors: false
+  const docs = await splunkRestRequest(recordArraySchema, {
+    path: collectionPath(collection),
+    query: {
+      output_mode: "json",
+      query: JSON.stringify(filter),
+      count: limit
     }
   });
-  return (response.result.points ?? []).map((point) => point.payload as T);
+  return docs as T[];
 }
 
 export async function updateDocument<T>(collection: string, key: string, updates: Partial<T>, options?: KvStoreOptions): Promise<void> {
   const current = await getDocument<Record<string, unknown>>(collection, key, options);
   if (!current) {
-    throw new Error(`OperaIQ memory document ${collection}/${key} does not exist`);
+    throw new Error(`Splunk KV document ${collection}/${key} does not exist`);
   }
   if (scoped(collection)) requireOrgId(collection, options?.orgId);
-  const next: Record<string, unknown> = {
-    ...current,
-    ...normalizeDocument(updates),
-    _key: key,
-    collection,
-    kind: typeof current.kind === "string" ? current.kind : kindForCollection(collection),
-    updatedAt: new Date().toISOString()
-  };
-  if (scoped(collection)) next.orgId = current.orgId;
-  await upsertMemoryDocument(collection, next);
+  const next: Record<string, unknown> = { ...current, ...normalizeDocument(updates), _key: key };
+  if (scoped(collection)) {
+    next.orgId = current.orgId;
+  }
+  await splunkRestRequest(z.record(z.unknown()).default({}), {
+    method: "POST",
+    path: `${collectionPath(collection)}/${encodeURIComponent(key)}`,
+    query: { output_mode: "json" },
+    json: next
+  });
 }
 
 export async function deleteDocument(collection: string, key: string, options?: KvStoreOptions): Promise<void> {
@@ -268,24 +183,25 @@ export async function deleteDocument(collection: string, key: string, options?: 
     const current = await getDocument<Record<string, unknown>>(collection, key, options);
     if (!current) return;
   }
-  await ensureStorageReady();
-  const config = getQdrantConfig();
-  await qdrantRequest(z.record(z.unknown()), {
-    method: "POST",
-    path: `/collections/${encodeURIComponent(config.QDRANT_COLLECTION)}/points/delete`,
-    query: { wait: true },
-    json: { points: [pointIdFor(collection, key)] }
+  await splunkRestRequest(z.record(z.unknown()).default({}), {
+    method: "DELETE",
+    path: `${collectionPath(collection)}/${encodeURIComponent(key)}`,
+    query: { output_mode: "json" }
   });
 }
 
 export async function clearCollection(collection: string, options?: KvStoreOptions): Promise<void> {
-  await ensureStorageReady();
-  const config = getQdrantConfig();
-  await qdrantRequest(z.record(z.unknown()), {
-    method: "POST",
-    path: `/collections/${encodeURIComponent(config.QDRANT_COLLECTION)}/points/delete`,
-    query: { wait: true },
-    json: { filter: qdrantFilter({ collection, ...scopedFilter(collection, {}, options) }) }
+  if (scoped(collection)) {
+    const docs = await queryDocuments<SplunkRecord>(collection, {}, 10_000, options);
+    for (const doc of docs) {
+      if (doc._key) await deleteDocument(collection, doc._key, options);
+    }
+    return;
+  }
+  await splunkRestRequest(z.record(z.unknown()).default({}), {
+    method: "DELETE",
+    path: collectionPath(collection),
+    query: { output_mode: "json" }
   });
 }
 
@@ -299,8 +215,6 @@ export async function batchInsert<T>(collection: string, docs: T[], options?: Kv
 }
 
 export async function countDocuments(collection: string, filter: Record<string, unknown> = {}, options?: KvStoreOptions): Promise<number> {
-  const docs = await queryDocuments<QdrantRecord>(collection, filter, 10_000, options);
+  const docs = await queryDocuments<SplunkRecord>(collection, filter, 10_000, options);
   return docs.length;
 }
-
-export { memoryText as qdrantMemoryText, qdrantFilter as qdrantPayloadFilter };

@@ -1,4 +1,4 @@
-name: OperaIQ Keepalive
+name: Sentinel Render Keepalive
 
 on:
   schedule:
@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Ping OperaIQ API health
+      - name: Ping Sentinel API health
         run: |
-          curl --fail --silent --show-error --max-time 60 https://operaiq-api.3.208.71.125.sslip.io/health
-      - name: Ping OperaIQ web shell
+          curl --fail --silent --show-error --max-time 60 https://sentinel-api-n8ly.onrender.com/health
+      - name: Ping Sentinel web shell
         run: |
-          curl --fail --silent --show-error --max-time 60 --header "Accept: text/html" https://operaiq.onrender.com/
+          curl --fail --silent --show-error --max-time 60 --header "Accept: text/html" https://sentinel-api-n8ly.onrender.com/

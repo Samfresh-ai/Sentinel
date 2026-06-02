@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { qdrantMemoryPut, qdrantMemoryQuery } from "@sentinel/splunk-mcp";
+import { splunkKvPut, splunkKvQuery } from "@sentinel/splunk-mcp";
 import { generateRunbook } from "../gemini.js";
 import { getRunbookSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
@@ -95,22 +95,18 @@ function descriptionScore(runbook: Record<string, unknown>, incidentDescription:
   return Number((matched / incidentTokens.size).toFixed(4));
 }
 
-function combinedSimilarity(runbook: Record<string, unknown>, services: string[], description: string): number {
-  return Number(Math.min(1, overlapScore(runbook, services) + descriptionScore(runbook, description)).toFixed(4));
-}
-
 async function saveGeneratedRunbook(input: { incidentDescription: string; affectedServices: string[]; orgId: string }): Promise<RunbookResult> {
   const generated = await generateRunbook(input);
   const now = new Date().toISOString();
-  const inserted = await qdrantMemoryPut("runbooks", null, {
+  const inserted = await splunkKvPut("runbooks", null, {
     title: generated.title,
     incidentType: generated.incidentType,
     steps: generated.steps,
-    applicableServices: input.affectedServices,
-    successCriteria: generated.successCriteria,
-    fallbackAction: "notify_team",
-    createdAt: now,
-    updatedAt: now
+      applicableServices: input.affectedServices,
+      successCriteria: generated.successCriteria,
+      fallbackAction: "notify_team",
+      createdAt: now,
+      updatedAt: now
   }, input.orgId);
   return {
     id: inserted.key,
@@ -133,12 +129,12 @@ export async function sentinelGetRunbook(input: unknown): Promise<RunbookResult 
       ? [parsed.rootCauseCandidate, ...parsed.affectedServices.filter((service) => service !== parsed.rootCauseCandidate)]
       : parsed.affectedServices;
     const runbooks = prioritizedServices.length
-      ? await qdrantMemoryQuery("runbooks", { applicableServices: { $in: prioritizedServices } }, 25, parsed.orgId)
-      : await qdrantMemoryQuery("runbooks", {}, 25, parsed.orgId);
+      ? await splunkKvQuery("runbooks", { applicableServices: { $in: prioritizedServices } }, 25, parsed.orgId)
+      : await splunkKvQuery("runbooks", {}, 25, parsed.orgId);
     const top = runbooks
       .map((doc) => ({
         doc,
-        score: combinedSimilarity(doc, prioritizedServices, `${parsed.rootCauseCandidate ?? ""}\n${parsed.incidentDescription}`)
+        score: overlapScore(doc, prioritizedServices) + descriptionScore(doc, `${parsed.rootCauseCandidate ?? ""}\n${parsed.incidentDescription}`)
       }))
       .sort((left, right) => right.score - left.score)[0];
     if (top && top.score > 0) {
@@ -157,6 +153,6 @@ export async function sentinelGetRunbook(input: unknown): Promise<RunbookResult 
 
 export const sentinelGetRunbookDefinition: AgentToolDefinition = {
   name: "get_runbook",
-  description: "Retrieve the most relevant Qdrant memory runbook, generating one if no service match exists.",
+  description: "Retrieve the most relevant Splunk KV Store runbook, generating one if no service match exists.",
   inputSchema: getRunbookSchema
 };

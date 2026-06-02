@@ -39,7 +39,7 @@ function apiBaseUrl(req: Request): string {
 }
 
 function webhookUrl(req: Request, orgId: string, secret: string): string {
-  return `${apiBaseUrl(req)}/webhooks/alert?orgId=${encodeURIComponent(orgId)}&secret=${encodeURIComponent(secret)}`;
+  return `${apiBaseUrl(req)}/webhooks/splunk-alert?orgId=${encodeURIComponent(orgId)}&secret=${encodeURIComponent(secret)}`;
 }
 
 function signToken(payload: AuthenticatedOrg): string {
@@ -214,7 +214,7 @@ export function authRouter(): Router {
         orgName: typeof org.orgName === "string" ? org.orgName : auth.orgName,
         adminEmail: typeof org?.adminEmail === "string" ? org.adminEmail : "",
         brainSize,
-        webhookUrl: `${apiBaseUrl(req)}/webhooks/alert?orgId=${encodeURIComponent(auth.orgId)}&secret=<shown-once-at-signup>`
+        webhookUrl: `${apiBaseUrl(req)}/webhooks/splunk-alert?orgId=${encodeURIComponent(auth.orgId)}&secret=<shown-once-at-signup>`
       });
     } catch (error) {
       next(error);

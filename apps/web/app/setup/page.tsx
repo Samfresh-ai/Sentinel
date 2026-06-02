@@ -21,7 +21,7 @@ export default function SetupPage() {
       setWebhookUrl(result.webhookUrl);
       setMode("ready");
     } catch (submitError: unknown) {
-      setError(submitError instanceof Error ? submitError.message : "Unable to create OperaIQ");
+      setError(submitError instanceof Error ? submitError.message : "Unable to create Sentinel");
     }
   }
 
@@ -43,13 +43,13 @@ export default function SetupPage() {
   return (
     <main className="min-h-screen bg-background px-4 py-6 text-foreground">
       <section className="mx-auto max-w-[720px] border border-border bg-panel">
-        <div className="border-b border-border px-4 py-3 font-mono text-[14px] font-semibold uppercase tracking-[0.18em]">OperaIQ</div>
+        <div className="border-b border-border px-4 py-3 font-mono text-[14px] font-semibold uppercase tracking-[0.18em]">Sentinel</div>
         <div className="space-y-5 p-4 md:p-6">
           {mode !== "ready" ? (
             <>
               <div>
-                <h1 className="max-w-full break-words font-mono text-[16px] uppercase leading-7 tracking-[0.08em] sm:text-[18px]">Set up your team's OperaIQ agent.</h1>
-                <p className="mt-2 text-[13px] text-muted">Each team gets an isolated incident feed, Qdrant brain, services, runbooks, and post-mortems.</p>
+                <h1 className="font-mono text-[18px] uppercase tracking-[0.08em]">Set up your team's Sentinel agent.</h1>
+                <p className="mt-2 text-[13px] text-muted">Each team gets an isolated incident feed, brain, services, runbooks, and post-mortems.</p>
               </div>
               {mode === "signup" ? (
                 <label className="block text-[13px] text-muted">
@@ -68,18 +68,18 @@ export default function SetupPage() {
               {error ? <div className="border border-critical px-3 py-2 text-[13px] text-critical">{error}</div> : null}
               <div className="flex flex-wrap items-center gap-3">
                 <button className="border border-active bg-active px-4 py-2 font-mono text-[12px] uppercase tracking-[0.08em] text-background" onClick={mode === "signup" ? createOrg : signIn}>
-                  {mode === "signup" ? "Create OperaIQ ->" : "Sign in ->"}
+                  {mode === "signup" ? "Create Sentinel ->" : "Sign in ->"}
                 </button>
                 <button className="font-mono text-[12px] uppercase tracking-[0.08em] text-muted hover:text-foreground" onClick={() => setMode(mode === "signup" ? "login" : "signup")}>
-                  {mode === "signup" ? "Already have an account? Sign in" : "Need a new OperaIQ? Create one"}
+                  {mode === "signup" ? "Already have an account? Sign in" : "Need a new Sentinel? Create one"}
                 </button>
               </div>
             </>
           ) : (
             <>
               <div>
-                <h1 className="max-w-full break-words font-mono text-[16px] uppercase leading-7 tracking-[0.08em] sm:text-[18px]">OPERAIQ is ready.</h1>
-                <p className="mt-2 text-[13px] text-muted">Send incidents to this URL. OperaIQ will retrieve Qdrant memory, act, verify, and write the post-mortem back to memory.</p>
+                <h1 className="font-mono text-[18px] uppercase tracking-[0.08em]">SENTINEL is ready.</h1>
+                <p className="mt-2 text-[13px] text-muted">Add this URL as an alert action in any Splunk saved search. Sentinel will autonomously investigate and resolve those alerts.</p>
               </div>
               <div>
                 <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-muted-deep">Your webhook URL</div>
@@ -90,7 +90,7 @@ export default function SetupPage() {
                   Copy webhook URL
                 </button>
                 <button className="border border-active bg-active px-4 py-2 font-mono text-[12px] uppercase tracking-[0.08em] text-background" onClick={() => router.replace("/")}>
-                  Open OperaIQ {"->"}
+                  Open Sentinel {"->"}
                 </button>
               </div>
             </>

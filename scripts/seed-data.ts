@@ -238,6 +238,7 @@ export const runbooks = [
     successCriteria: "Write errors stop and queue depth drains to normal operating range."
   }
 ];
+
 export const incidents = [
   {
     title: "INC-2026-0101 Redis connection pool exhausted during checkout",
@@ -553,3 +554,4 @@ export const patterns = [
     confirmedCount: 5
   }
 ];
+

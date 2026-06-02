@@ -32,26 +32,24 @@ export const getServiceDependencyGraphSchema: JsonSchema = {
   }
 };
 
-export const queryQdrantMemorySchema: JsonSchema = {
+export const querySplunkLogsSchema: JsonSchema = {
   type: "object",
   required: ["description"],
   properties: {
-    query: { type: "string", description: "Plain-English memory/signal query for Qdrant vector retrieval" },
-    services: { type: "array", items: { type: "string" }, description: "Services to investigate against Qdrant service context and incident memory" },
+    spl: { type: "string", description: "Targeted SPL search to run against recent Splunk events" },
+    services: { type: "array", items: { type: "string" }, description: "Services to investigate with one SPL query per service" },
     symptoms: { type: "array", items: { type: "string" }, description: "Symptoms used to focus multi-service signal searches" },
     timeRange: {
       type: "object",
       properties: {
-        earliest: { type: "string", description: "Relative lower bound label, for example -15m" },
-        latest: { type: "string", description: "Relative upper bound label, for example now" }
+        earliest: { type: "string", description: "Splunk earliest time, for example -15m" },
+        latest: { type: "string", description: "Splunk latest time, for example now" }
       },
       additionalProperties: false
     },
-    description: { type: "string", description: "Plain-English reason this Qdrant retrieval is being run" }
+    description: { type: "string", description: "Plain-English reason this investigation search is being run" }
   }
 };
-
-export const querySplunkLogsSchema = queryQdrantMemorySchema;
 
 export const executeRemediationSchema: JsonSchema = {
   type: "object",
@@ -82,7 +80,7 @@ export const writePostmortemSchema: JsonSchema = {
         properties: {
           timestamp: { type: "string" },
           event: { type: "string" },
-          actor: { type: "string", enum: ["operaiq", "sentinel", "human"] }
+          actor: { type: "string", enum: ["sentinel", "human"] }
         }
       }
     },

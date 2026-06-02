@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { findSimilarIncidents } from "@sentinel/splunk-brain";
-import { qdrantMemoryQuery } from "@sentinel/splunk-mcp";
+import { splunkKvQuery } from "@sentinel/splunk-mcp";
 import { searchSimilarIncidentsSchema, type AgentToolDefinition } from "../tool-json-schemas.js";
 import { asNullableString, asNumber, asString, asStringArray, invocationFailed, invocationFinished, invocationStarted } from "./common.js";
 
@@ -58,16 +58,17 @@ export async function sentinelSearchSimilarIncidents(input: unknown): Promise<Si
   const parsed = sentinelSearchSimilarIncidentsInputSchema.parse(input);
   invocationStarted("search_similar_incidents", parsed);
   try {
-    const qdrantMatches = await findSimilarIncidents(parsed.symptoms, parsed.limit, {
+    // Sentinel's score is honest keyword overlap from SPL/KV Store, not vector similarity.
+    const splMatches = await findSimilarIncidents(parsed.symptoms, parsed.limit, {
       orgId: parsed.orgId,
       ...(parsed.currentIncidentId ? { currentIncidentId: parsed.currentIncidentId } : {})
     });
-    if (qdrantMatches.length > 0) {
-      invocationFinished("search_similar_incidents", qdrantMatches);
-      return qdrantMatches;
+    if (splMatches.length > 0) {
+      invocationFinished("search_similar_incidents", splMatches);
+      return splMatches;
     }
 
-    const docs = await qdrantMemoryQuery("incidents", { status: "resolved" }, 100, parsed.orgId);
+    const docs = await splunkKvQuery("incidents", { status: "resolved" }, 100, parsed.orgId);
     const symptomTerms = tokens(parsed.symptoms);
     const fallback = docs
       .filter((doc) => asString(doc._key) !== parsed.currentIncidentId)
@@ -85,6 +86,6 @@ export async function sentinelSearchSimilarIncidents(input: unknown): Promise<Si
 
 export const sentinelSearchSimilarIncidentsDefinition: AgentToolDefinition = {
   name: "search_similar_incidents",
-  description: "Find resolved past OperaIQ incidents using Qdrant vector memory.",
+  description: "Find resolved past Sentinel incidents using SPL/KV keyword overlap against Splunk history.",
   inputSchema: searchSimilarIncidentsSchema
 };

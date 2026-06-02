@@ -10,18 +10,9 @@ const optionalUrl = z.preprocess(
   z.string().url().optional()
 );
 
-const booleanString = z.preprocess((value) => {
-  if (typeof value !== "string") return value;
-  const normalized = value.trim().toLowerCase();
-  if (["true", "1", "yes"].includes(normalized)) return true;
-  if (["false", "0", "no"].includes(normalized)) return false;
-  if (normalized.length === 0) return undefined;
-  return value;
-}, z.boolean());
-
 export const severitySchema = z.enum(["P1", "P2", "P3", "P4"]);
 export const incidentStatusSchema = z.enum(["open", "resolved", "in_progress", "escalated", "failed"]);
-export const actorSchema = z.enum(["operaiq", "sentinel", "human"]);
+export const actorSchema = z.enum(["sentinel", "human"]);
 export const remediationActionSchema = z.enum([
   "scale_service",
   "restart_pod",
@@ -47,17 +38,6 @@ export const envSchema = z.object({
   OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
   OPENAI_COMPATIBLE_BASE_URL: optionalUrl,
   OPENAI_COMPATIBLE_MODEL: optionalNonEmptyString,
-  QDRANT_URL: z.string().url().default("http://localhost:6333"),
-  QDRANT_API_KEY: z.string().optional(),
-  QDRANT_COLLECTION: z.string().min(1).default("operaiq_memory"),
-  EMBEDDING_PROVIDER: z.enum(["nvidia", "openai"]).default("nvidia"),
-  NVIDIA_EMBEDDING_MODEL: z.string().min(1).default("nvidia/nv-embedqa-e5-v5"),
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
-  OPENAI_EMBEDDING_MODEL: z.string().min(1).default("text-embedding-3-small"),
-  OPERAIQ_ORG_ID: z.string().min(1).default("operaiq-local-org"),
-  OPERAIQ_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.82),
-  OPERAIQ_AUTO_ACT_LOW_RISK: booleanString.default(true),
   AGENT_BUILDER_AGENT_ID: z.string().optional(),
   SLACK_BOT_TOKEN: z.string().optional(),
   SLACK_DEFAULT_INCIDENT_CHANNEL: z.string().optional(),
@@ -152,7 +132,7 @@ export const prometheusAlertSchema = z
 
 export const genericSentinelAlertPayloadSchema = z
   .object({
-    source: z.enum(["operaiq", "sentinel"]).default("operaiq"),
+    source: z.literal("sentinel").default("sentinel"),
     title: z.string().min(1),
     severity: severitySchema,
     service: z.string().min(1),
@@ -164,7 +144,7 @@ export const genericSentinelAlertPayloadSchema = z
   .passthrough();
 
 export const normalizedAlertSchema = z.object({
-  source: z.enum(["pagerduty", "datadog", "prometheus", "operaiq", "sentinel"]),
+  source: z.enum(["pagerduty", "datadog", "prometheus", "sentinel"]),
   title: z.string().min(1),
   severity: severitySchema,
   affectedServices: z.array(z.string().min(1)).min(1),

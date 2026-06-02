@@ -1,6 +1,6 @@
 import { JobsClient } from "@google-cloud/run";
 import { WebClient } from "@slack/web-api";
-import { qdrantMemoryPut, qdrantMemoryQuery, qdrantMemorySend } from "@sentinel/splunk-mcp";
+import { splunkHecSend, splunkKvPut, splunkKvQuery } from "@sentinel/splunk-mcp";
 import { executeRemediationInputSchema, type ExecuteRemediationResult, type RemediationAction, type RiskLevel } from "@sentinel/shared";
 import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@sentinel/shared";
 import { getAgentEnv } from "../env.js";
@@ -31,7 +31,7 @@ function isLocalVerifyMode(): boolean {
 }
 
 function agentName(): string {
-  return "OperaIQ";
+  return "Sentinel";
 }
 
 function cloudRunJobResource(action: RemediationAction): string {
@@ -57,7 +57,7 @@ function slackClient(): WebClient {
 
 async function serviceConfig(targetService: string, orgId?: string): Promise<ServiceExecutionConfig> {
   if (orgId) {
-    const serviceDoc = (await qdrantMemoryQuery("services", { name: targetService }, 1, orgId))[0];
+    const serviceDoc = (await splunkKvQuery("services", { name: targetService }, 1, orgId))[0];
     if (!serviceDoc) {
       return {
         name: targetService,
@@ -67,7 +67,7 @@ async function serviceConfig(targetService: string, orgId?: string): Promise<Ser
         cloudRunServiceName: null
       };
     }
-    const runtimeDoc = (await qdrantMemoryQuery("service_runtime_configs", { serviceName: targetService }, 1, orgId))[0];
+    const runtimeDoc = (await splunkKvQuery("service_runtime_configs", { serviceName: targetService }, 1, orgId))[0];
     return {
       name: asString(serviceDoc.name),
       owners: asStringArray(serviceDoc.owners),
@@ -130,20 +130,20 @@ async function logExecution(input: {
       executedAt: input.executedAt.toISOString(),
       createdAt: new Date().toISOString()
     };
-    await qdrantMemoryPut("remediation_executions", null, document, input.orgId);
-    await qdrantMemorySend({
-      sourcetype: "operaiq:remediation",
+    await splunkKvPut("remediation_executions", null, document, input.orgId);
+    await splunkHecSend({
+      sourcetype: "sentinel:remediation",
       event: {
         type: "remediation_execution",
         ...document,
-        generatedBy: "operaiq"
+        generatedBy: "sentinel"
       }
     });
     return;
   }
 
-  await qdrantMemorySend({
-    sourcetype: "operaiq:remediation",
+  await splunkHecSend({
+    sourcetype: "sentinel:remediation",
     event: {
       type: "remediation_execution",
       action: input.action,
@@ -154,7 +154,7 @@ async function logExecution(input: {
       output: input.output,
       requiresHumanApproval: input.requiresHumanApproval,
       executedAt: input.executedAt.toISOString(),
-      generatedBy: "operaiq"
+      generatedBy: "sentinel"
     }
   });
 }
@@ -218,7 +218,7 @@ async function postSlackMessage(config: ServiceExecutionConfig, input: {
               targetService: input.targetService,
               parameters: input.parameters
             }),
-            action_id: "operaiq_approve_remediation"
+            action_id: "sentinel_approve_remediation"
           }
         ]
       }
@@ -320,7 +320,7 @@ async function dispatchAdminEndpoint(
 }
 
 export async function executeRemediation(input: unknown): Promise<ExecuteRemediationResult> {
-  assertProductionSafeRuntime("OperaIQ remediation executor");
+  assertProductionSafeRuntime("Sentinel remediation executor");
   const parsed = executeRemediationInputSchema.parse(input);
   invocationStarted("execute_remediation", parsed);
   const executedAt = new Date();
