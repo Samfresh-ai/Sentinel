@@ -59,6 +59,10 @@ function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown Sentinel agent failure";
 }
 
+function shortError(error: unknown): string {
+  return messageFromError(error).replace(/\s+/g, " ").slice(0, 1_000);
+}
+
 async function auditedPhase<T>(
   context: {
     orgId: string;
@@ -813,13 +817,24 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         input: { timeline, remediationResults }
       },
       async () => {
-        const conclusion = await generateIncidentConclusion({
-          alertTitle: parsed.alert.title,
-          symptoms: parsed.alert.symptoms,
-          similarIncidents,
-          dependencyGraph: graph,
-          remediationResults
-        });
+        let conclusion: { rootCause: string; lessonLearned: string };
+        let conclusionGeneratorError: string | null = null;
+        try {
+          conclusion = await generateIncidentConclusion({
+            alertTitle: parsed.alert.title,
+            symptoms: parsed.alert.symptoms,
+            similarIncidents,
+            dependencyGraph: graph,
+            remediationResults
+          });
+        } catch (error: unknown) {
+          conclusionGeneratorError = shortError(error);
+          conclusion = {
+            rootCause: `Verified remediation resolved the alert, but Sentinel's incident conclusion generator failed after retries: ${conclusionGeneratorError}`,
+            lessonLearned: "Keep successfully acted and verified incidents resolved when narrative generation fails; preserve the generator error in the postmortem instead of hiding it."
+          };
+          addTimeline("Sentinel incident conclusion generator failed after retries; using verified remediation evidence for closure.");
+        }
         const rootCause = rootCauseCandidate
           ? `${rootCauseCandidate}: ${conclusion.rootCause}`
           : conclusion.rootCause;
@@ -832,9 +847,18 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
           remediationTaken: remediationResults.map((item) => JSON.stringify(item)),
           lessonLearned: conclusion.lessonLearned
         });
-        await emit(sink, parsed.incidentId, "CLOSE", `Wrote Sentinel post-mortem ${result.postmortemId} to Splunk KV Store and HEC.`, {
-          postmortem: result
-        });
+        await emit(
+          sink,
+          parsed.incidentId,
+          "CLOSE",
+          result.postmortemGeneratorStatus === "generated" && !conclusionGeneratorError
+            ? `Wrote Sentinel post-mortem ${result.postmortemId} to Splunk KV Store and HEC.`
+            : `Stored Sentinel post-mortem ${result.postmortemId} after verified remediation; generator error details were preserved.`,
+          {
+            postmortem: result,
+            conclusionGeneratorError
+          }
+        );
         return result;
       },
       recordFrom

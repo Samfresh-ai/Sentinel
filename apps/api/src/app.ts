@@ -409,6 +409,8 @@ function serializeSentinelPostmortem(postmortem: Record<string, unknown>): Recor
     preventionActions: asStringArray(postmortem.preventionActions),
     lessonLearned: asString(postmortem.lessonLearned),
     generatedBy: asString(postmortem.generatedBy),
+    postmortemGeneratorStatus: asString(postmortem.postmortemGeneratorStatus),
+    postmortemGeneratorError: asString(postmortem.postmortemGeneratorError),
     createdAt: asString(postmortem.createdAt)
   };
 }

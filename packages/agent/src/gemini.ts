@@ -108,6 +108,62 @@ const openAiCompatibleChatResponseSchema = z.object({
   ).min(1)
 }).passthrough();
 
+const GENERATION_TIMEOUT_MS = Number.parseInt(process.env.SENTINEL_GENERATION_TIMEOUT_MS ?? "30000", 10);
+const GENERATION_RETRY_ATTEMPTS = Number.parseInt(process.env.SENTINEL_GENERATION_RETRY_ATTEMPTS ?? "3", 10);
+
+function generationTimeoutMs(): number {
+  return Number.isFinite(GENERATION_TIMEOUT_MS) && GENERATION_TIMEOUT_MS > 0 ? GENERATION_TIMEOUT_MS : 30_000;
+}
+
+function generationBackoffMs(attempt: number): number {
+  return Math.min(6_000, 750 * 2 ** Math.max(0, attempt - 1));
+}
+
+function generationRetryAttempts(): number {
+  return Number.isFinite(GENERATION_RETRY_ATTEMPTS) && GENERATION_RETRY_ATTEMPTS > 0 ? GENERATION_RETRY_ATTEMPTS : 3;
+}
+
+function generationErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function retryableGenerationError(error: unknown): boolean {
+  const message = generationErrorMessage(error).toLowerCase();
+  return (
+    message.includes("timeout") ||
+    message.includes("aborted") ||
+    message.includes("econnreset") ||
+    message.includes("socket") ||
+    message.includes("openai-compatible generation failed with 408") ||
+    message.includes("openai-compatible generation failed with 429") ||
+    message.includes("openai-compatible generation failed with 500") ||
+    message.includes("openai-compatible generation failed with 502") ||
+    message.includes("openai-compatible generation failed with 503") ||
+    message.includes("openai-compatible generation failed with 504")
+  );
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withGenerationRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  const attempts = generationRetryAttempts();
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      lastError = error;
+      if (attempt >= attempts || !retryableGenerationError(error)) break;
+      await delay(generationBackoffMs(attempt));
+    }
+  }
+  throw lastError;
+}
+
 function openAiCompatibleConfig(env: AgentEnv): { apiKey: string; baseUrl: string; model: string } {
   const provider = generationProvider(env);
   if (provider === "nvidia") {
@@ -135,22 +191,37 @@ function openAiCompatibleConfig(env: AgentEnv): { apiKey: string; baseUrl: strin
 
 async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
   const config = openAiCompatibleConfig(getAgentEnv());
-  const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-      max_tokens: 900
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, generationTimeoutMs());
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        max_tokens: 900
+      }),
+      signal: controller.signal
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`OpenAI-compatible generation timed out after ${generationTimeoutMs()}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`OpenAI-compatible generation failed with ${response.status}: ${body}`);
+    throw new Error(`OpenAI-compatible generation failed with ${response.status}: ${body.slice(0, 1_000)}`);
   }
   const parsed = openAiCompatibleChatResponseSchema.parse(JSON.parse(body));
   const text = parsed.choices[0]?.message.content;
@@ -168,7 +239,7 @@ async function generateJsonText(prompt: string): Promise<string> {
   }
 
   if (provider === "nvidia" || provider === "openai-compatible") {
-    return generateOpenAiCompatibleText(prompt);
+    return withGenerationRetry(() => generateOpenAiCompatibleText(prompt));
   }
 
   const response = await getAiClient().models.generateContent({

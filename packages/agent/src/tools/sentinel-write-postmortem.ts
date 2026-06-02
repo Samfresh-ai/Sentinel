@@ -8,6 +8,8 @@ export type WritePostmortemResult = {
   postmortemId: string;
   summary: string;
   preventionActions: string[];
+  postmortemGeneratorStatus: "generated" | "fallback_after_error";
+  postmortemGeneratorError: string | null;
 };
 
 export const sentinelWritePostmortemInputSchema = z.object({
@@ -34,6 +36,14 @@ function durationMinutes(incident: Record<string, unknown>, closedAt: Date): num
   return typeof existing === "number" && Number.isFinite(existing) ? existing : 0;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function truncateError(error: unknown): string {
+  return errorMessage(error).replace(/\s+/g, " ").slice(0, 1_000);
+}
+
 export async function sentinelWritePostmortem(input: unknown): Promise<WritePostmortemResult> {
   const parsed = sentinelWritePostmortemInputSchema.parse(input);
   invocationStarted("write_postmortem", parsed);
@@ -42,13 +52,36 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
     if (!incident) {
       throw new Error(`Sentinel incident ${parsed.incidentId} does not exist`);
     }
-    const generated = await generatePostmortemFields({
-      title: asString(incident.title),
-      timeline: parsed.timeline,
-      rootCause: parsed.rootCause,
-      remediationTaken: parsed.remediationTaken,
-      lessonLearned: parsed.lessonLearned
-    });
+    let postmortemGeneratorStatus: WritePostmortemResult["postmortemGeneratorStatus"] = "generated";
+    let postmortemGeneratorError: string | null = null;
+    let generated: {
+      summary: string;
+      contributingFactors: string[];
+      preventionActions: string[];
+    };
+    try {
+      generated = await generatePostmortemFields({
+        title: asString(incident.title),
+        timeline: parsed.timeline,
+        rootCause: parsed.rootCause,
+        remediationTaken: parsed.remediationTaken,
+        lessonLearned: parsed.lessonLearned
+      });
+    } catch (error: unknown) {
+      postmortemGeneratorStatus = "fallback_after_error";
+      postmortemGeneratorError = truncateError(error);
+      generated = {
+        summary: `Sentinel resolved ${asString(incident.title) || parsed.incidentId}, but the postmortem generator failed after retries. This postmortem preserves the verified remediation evidence without pretending an LLM summary was generated.`,
+        contributingFactors: [
+          parsed.rootCause,
+          `Postmortem generator error: ${postmortemGeneratorError}`
+        ],
+        preventionActions: [
+          parsed.lessonLearned,
+          "Review generator availability separately; do not reopen or fail an incident that already acted and verified successfully."
+        ]
+      };
+    }
     const createdAt = new Date();
     const duration = durationMinutes(incident, createdAt);
     const inserted = await splunkKvPut("postmortems", null, {
@@ -63,6 +96,8 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
       preventionActions: generated.preventionActions,
       lessonLearned: parsed.lessonLearned,
       generatedBy: "sentinel",
+      postmortemGeneratorStatus,
+      postmortemGeneratorError,
       createdAt: createdAt.toISOString()
     }, parsed.orgId);
 
@@ -75,6 +110,8 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
       rootCause: parsed.rootCause,
       resolution,
       remediationSteps: parsed.remediationTaken,
+      postmortemGeneratorStatus,
+      postmortemGeneratorError,
       durationMinutes: duration,
       updatedAt: createdAt.toISOString()
     }, parsed.orgId);
@@ -94,6 +131,8 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
         durationMinutes: duration,
         preventionActions: generated.preventionActions,
         generatedBy: "sentinel",
+        postmortemGeneratorStatus,
+        postmortemGeneratorError,
         createdAt: createdAt.toISOString()
       }
     });
@@ -101,7 +140,9 @@ export async function sentinelWritePostmortem(input: unknown): Promise<WritePost
     const result = {
       postmortemId: inserted.key,
       summary: generated.summary,
-      preventionActions: generated.preventionActions
+      preventionActions: generated.preventionActions,
+      postmortemGeneratorStatus,
+      postmortemGeneratorError
     };
     invocationFinished("write_postmortem", result);
     return result;

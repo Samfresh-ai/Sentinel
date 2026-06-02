@@ -45,7 +45,7 @@ type IncidentSummary = {
 
 type IncidentDetail = {
   incident: IncidentSummary;
-  postmortem: { id: string } | null;
+  postmortem: { id: string; postmortemGeneratorStatus?: string; postmortemGeneratorError?: string | null } | null;
 };
 
 function writeLine(line: string): void {
@@ -263,15 +263,34 @@ async function disableSavedSearch(name: string): Promise<void> {
 
 async function sendProjectLogs(projectId: string): Promise<number> {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const events = Array.from({ length: 86 }, (_item, index) => {
-    const failure = index < 36;
-    const failureVariant = index % 3;
+  const events = Array.from({ length: 96 }, (_item, index) => {
+    const failure = index < 42;
+    const failureVariant = index % 6;
     const failureMessage =
       failureVariant === 0
-        ? "checkout failed after payment authorization: Redis read ECONNRESET, pool waiters rising, idempotency lock not released"
+        ? "checkout failed after payment authorization: Redis ECONNRESET spike, pool waiters rising, idempotency lock not released"
         : failureVariant === 1
-          ? "checkout retry storm: upstream Redis socket reset during capture, fallback cache miss, provider callback delayed"
-          : "checkout hard failure: cart reservation timed out after Redis MOVED redirect and ECONNRESET on reused TLS socket";
+          ? "Redis pool exhaustion: checkout connection pool waiters above safe limit after reused socket reset"
+          : failureVariant === 2
+            ? "checkout 503 returned after payment token creation; Redis ECONNRESET blocked order finalization"
+            : failureVariant === 3
+              ? "worker timeout while draining checkout queue backlog; Redis ECONNRESET kept retrying ledger writes"
+              : failureVariant === 4
+                ? "degraded dependency: redis-cache stale sockets caused checkout-api to shed traffic"
+                : "stack-only failure captured; message omitted app fingerprint while stack contains Redis ECONNRESET details";
+    const stack = failureVariant === 5
+      ? [
+          "RedisConnectionPoolExhausted: ECONNRESET in checkout-confirm worker",
+          "    at RedisPool.acquire (/srv/app/src/redis/pool.ts:66:11)",
+          "    at CheckoutWorker.finalize (/srv/app/src/workers/checkout-finalize.ts:144:19)",
+          "    at async QueueDrain.process (/srv/app/src/workers/queue-drain.ts:88:7)"
+        ].join("\\n")
+      : [
+          "Error: read ECONNRESET",
+          "    at RedisSocket.onStreamRead (node:internal/stream_base_commons:217:20)",
+          "    at PaymentCapture.confirm (/srv/app/src/checkout/payment-capture.ts:184:17)",
+          "    at async CheckoutController.confirm (/srv/app/src/checkout/controller.ts:77:9)"
+        ].join("\\n");
     return {
       index: "prod",
       sourcetype: "app",
@@ -283,6 +302,7 @@ async function sendProjectLogs(projectId: string): Promise<number> {
         level: failure ? "error" : "info",
         service: "payment",
         error_type: failure ? "ECONNRESET" : "OK",
+        status_code: failure ? 503 : 200,
         route: "/checkout/confirm",
         region: index % 2 === 0 ? "iad" : "atl",
         deploy_sha: "sentinel-human-flow-hard-log",
@@ -292,19 +312,16 @@ async function sendProjectLogs(projectId: string): Promise<number> {
         retry_attempt: failure ? (index % 4) + 1 : 0,
         redis_pool_active: failure ? 128 : 19 + (index % 5),
         redis_pool_waiting: failure ? 45 + index : index % 2,
+        checkout_queue_backlog: failure ? 420 + index * 3 : 12,
+        worker_timeout_ms: failure && failureVariant === 3 ? 30_000 : 0,
+        dependency_health: failure ? "degraded" : "healthy",
+        stack_only_signal: failure && failureVariant === 5,
         provider_status: failure ? "capture_pending" : "captured",
         root_signal: failure ? "redis_pool_exhaustion_after_econnreset" : "healthy_checkout",
         message: failure
           ? failureMessage
           : "checkout completed",
-        error_stack: failure
-          ? [
-              "Error: read ECONNRESET",
-              "    at RedisSocket.onStreamRead (node:internal/stream_base_commons:217:20)",
-              "    at PaymentCapture.confirm (/srv/app/src/checkout/payment-capture.ts:184:17)",
-              "    at async CheckoutController.confirm (/srv/app/src/checkout/controller.ts:77:9)"
-            ].join("\\n")
-          : null,
+        error_stack: failure ? stack : null,
         requestId: `${projectId}-${index}`
       }
     };
@@ -319,7 +336,7 @@ async function waitForIndexedLogs(projectId: string): Promise<{ total: number; e
     const row = (await runSearch(spl, { maxResults: 1 }))[0] ?? {};
     const total = Number(row.total ?? 0);
     const econnreset = Number(row.econnreset ?? 0);
-    if (total >= 86 && econnreset >= 30) return { total, econnreset };
+    if (total >= 96 && econnreset >= 40) return { total, econnreset };
     if (attempt % 4 === 0) writeLine(`WAIT logs indexed attempt=${attempt} total=${total} econnreset=${econnreset}`);
     await delay(2_500);
   }
@@ -418,7 +435,8 @@ async function main(): Promise<void> {
     proof.savedSearch = {
       search,
       schedule: CRON_SCHEDULE,
-      webhookConfigured: true
+      webhookConfigured: true,
+      hardSignals: ["ECONNRESET spike", "Redis pool exhaustion", "checkout 503", "worker timeout", "queue backlog", "degraded dependency", "stack-only Redis fingerprint"]
     };
 
     const logsSent = await sendProjectLogs(projectId);
@@ -437,6 +455,8 @@ async function main(): Promise<void> {
     const steps = detail.incident.agentEvents?.map((event) => event.stepType) ?? [];
     proof.finalStatus = detail.incident.status;
     proof.postmortemId = detail.incident.postMortemId ?? detail.postmortem?.id ?? null;
+    proof.postmortemGeneratorStatus = detail.postmortem?.postmortemGeneratorStatus ?? null;
+    proof.postmortemGeneratorError = detail.postmortem?.postmortemGeneratorError ?? null;
     proof.agentSteps = steps;
     const acceptance = proof.acceptance as Record<string, boolean>;
     acceptance.sentinelActed = steps.includes("ACT");

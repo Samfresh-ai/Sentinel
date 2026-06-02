@@ -76,6 +76,8 @@ export interface Postmortem {
   remediationTaken: string[];
   preventionActions: string[];
   lessonLearned: string;
+  postmortemGeneratorStatus?: "generated" | "fallback_after_error";
+  postmortemGeneratorError?: string | null;
   createdAt: string;
 }
 
