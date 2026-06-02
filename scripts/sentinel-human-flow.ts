@@ -14,6 +14,7 @@ import {
 const DEFAULT_API_URL = "https://sentinel-api-n8ly.onrender.com";
 const CRON_SCHEDULE = "* * * * *";
 const ARTIFACT_DIR = "artifacts/runtime";
+const API_REQUEST_TIMEOUT_MS = 20_000;
 
 const savedSearchSchema = z
   .object({
@@ -75,8 +76,12 @@ function redactWebhook(value: string): string {
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, API_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, { ...init, signal: controller.signal });
       const body = await response.text();
       if (!response.ok) {
         throw new Error(`${response.status} ${body}`);
@@ -84,9 +89,14 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       return JSON.parse(body) as T;
     } catch (error: unknown) {
       lastError = error;
+      if (error instanceof Error && error.name === "AbortError") {
+        lastError = new Error(`Sentinel API request timed out after ${API_REQUEST_TIMEOUT_MS}ms: ${url}`);
+      }
       if (error instanceof Error && /^\d{3}\s/.test(error.message)) throw error;
       if (attempt >= 4) break;
       await delay(750 * 2 ** (attempt - 1));
+    } finally {
+      clearTimeout(timeout);
     }
   }
   throw lastError;
