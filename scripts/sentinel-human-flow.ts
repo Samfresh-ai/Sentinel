@@ -73,12 +73,23 @@ function redactWebhook(value: string): string {
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`${response.status} ${body}`);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      const body = await response.text();
+      if (!response.ok) {
+        throw new Error(`${response.status} ${body}`);
+      }
+      return JSON.parse(body) as T;
+    } catch (error: unknown) {
+      lastError = error;
+      if (error instanceof Error && /^\d{3}\s/.test(error.message)) throw error;
+      if (attempt >= 4) break;
+      await delay(750 * 2 ** (attempt - 1));
+    }
   }
-  return JSON.parse(body) as T;
+  throw lastError;
 }
 
 async function delay(ms: number): Promise<void> {
