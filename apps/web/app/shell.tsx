@@ -182,6 +182,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Link href="/splunk" className={navClass(pathname === "/splunk")}>
               Splunk
             </Link>
+            <Link href="/test-app" className={navClass(pathname === "/test-app")}>
+              Test App
+            </Link>
             <Link href="/services" className={navClass(pathname === "/services")}>
               Services
             </Link>

@@ -16,12 +16,16 @@ import {
 import {
   countDocuments,
   createCollection,
+  createKvKey,
   getDocument,
   insertDocument,
   insertSentinelIncident,
   queryAllDocuments,
   queryDocuments,
   runSearch,
+  sendEvent,
+  splunkRestRequest,
+  type SplunkHECEvent,
   updateDocument,
   updateSentinelIncident,
   writeAuditEntry
@@ -52,6 +56,44 @@ const adminRemediationBodySchema = z.object({
   targetService: z.string().min(1),
   parameters: z.record(z.union([z.string(), z.number()])).default({})
 });
+const createProjectBodySchema = z.object({
+  name: z.string().min(2).max(80),
+  service: z.string().min(1).max(80).default("payment-service"),
+  environment: z.string().min(1).max(40).default("local"),
+  webhookUrl: z.string().url().optional()
+});
+const appLogSchema = z.object({
+  level: z.enum(["debug", "info", "warn", "error", "fatal"]).default("error"),
+  service: z.string().min(1).max(80).default("payment-service"),
+  message: z.string().min(1).max(4_000),
+  stack: z.string().max(12_000).optional(),
+  errorName: z.string().max(160).optional(),
+  traceId: z.string().max(160).optional(),
+  requestId: z.string().max(160).optional(),
+  route: z.string().max(240).optional(),
+  statusCode: z.number().int().min(100).max(599).optional(),
+  latencyMs: z.number().min(0).max(120_000).optional(),
+  timestamp: z.string().datetime().optional(),
+  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).default({})
+});
+const ingestProjectLogsBodySchema = z.object({
+  logs: z.array(appLogSchema).min(1).max(120)
+});
+const savedSearchSchema = z
+  .object({
+    entry: z
+      .array(
+        z
+          .object({
+            content: z.record(z.unknown()).default({})
+          })
+          .passthrough()
+      )
+      .default([])
+  })
+  .passthrough();
+
+type AppLog = z.infer<typeof appLogSchema>;
 
 function rawBodySaver(req: Request, _res: Response, buf: Buffer): void {
   rawBodies.set(req, Buffer.from(buf));
@@ -123,6 +165,7 @@ function verifyToolSecret(req: Request): void {
 }
 
 const SENTINEL_AUTONOMOUS_PAYMENT_SEARCH = "sentinel_auto_detect_payment_errors";
+const SENTINEL_HUMAN_FLOW_SEARCH_PREFIX = "sentinel_human_flow_";
 
 function severityFromSplunk(value: string | undefined): "P1" | "P2" | "P3" | "P4" {
   const normalized = value?.toUpperCase() ?? "";
@@ -190,7 +233,11 @@ function normalizeSplunkAlertBody(body: unknown): SplunkAlertPayload {
 }
 
 function normalizeSplunkAlert(payload: SplunkAlertPayload): NormalizedAlert {
-  if (payload.search_name === SENTINEL_AUTONOMOUS_PAYMENT_SEARCH || payload.search_name === "sentinel_test_payment_redis_spike") {
+  if (
+    payload.search_name === SENTINEL_AUTONOMOUS_PAYMENT_SEARCH ||
+    payload.search_name === "sentinel_test_payment_redis_spike" ||
+    payload.search_name.startsWith(SENTINEL_HUMAN_FLOW_SEARCH_PREFIX)
+  ) {
     const errorCount = splunkResultString(payload, "error_count") ?? splunkResultString(payload, "count");
     return {
       source: "sentinel",
@@ -302,6 +349,246 @@ async function checkSplunkWebhookRateLimit(orgId: string): Promise<{ allowed: bo
     return { allowed: false, retryAfter: 60 };
   }
   return { allowed: true, retryAfter: 0 };
+}
+
+function quoteSplunk(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+function sanitizedSearchPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^_+/, "").slice(0, 80) || createKvKey();
+}
+
+function savedSearchNameForProject(projectId: string): string {
+  return `${SENTINEL_HUMAN_FLOW_SEARCH_PREFIX}${sanitizedSearchPart(projectId)}`;
+}
+
+function projectWebhookUrl(input: { configuredUrl: string | undefined; orgId: string }): string {
+  if (!input.configuredUrl) {
+    throw new Error("Fresh webhookUrl is required before Sentinel can configure the Splunk saved search");
+  }
+  const parsed = new URL(input.configuredUrl);
+  if (!parsed.pathname.endsWith("/webhooks/splunk-alert") || parsed.searchParams.get("orgId") !== input.orgId) {
+    throw new Error("webhookUrl must be a Sentinel Splunk webhook URL for the authenticated org");
+  }
+  return input.configuredUrl;
+}
+
+function savedSearchForm(input: { name: string; search: string; webhookUrl: string; includeName: boolean }): Record<string, string> {
+  return {
+    ...(input.includeName ? { name: input.name } : {}),
+    search: input.search,
+    cron_schedule: "* * * * *",
+    is_scheduled: "1",
+    disabled: "0",
+    alert_type: "always",
+    "alert.severity": "1",
+    "alert.track": "1",
+    "alert.suppress": "1",
+    "alert.suppress.fields": "sentinelProjectId",
+    "alert.suppress.period": "24h",
+    "alert.digest_mode": "0",
+    actions: "webhook",
+    "action.webhook": "1",
+    "action.webhook.param.url": input.webhookUrl,
+    "dispatch.earliest_time": "-5m@m",
+    "dispatch.latest_time": "now",
+    description: "Sentinel browser acceptance detector: app logs to Splunk, Splunk fires webhook, Sentinel acts."
+  };
+}
+
+async function savedSearchContent(name: string): Promise<Record<string, unknown> | null> {
+  const response = await splunkRestRequest(savedSearchSchema, {
+    path: `/servicesNS/admin/sentinel/saved/searches/${encodeURIComponent(name)}`,
+    query: { output_mode: "json" }
+  }).catch(() => null);
+  return response?.entry?.[0]?.content ?? null;
+}
+
+async function configureProjectSavedSearch(input: { projectId: string; webhookUrl: string }): Promise<{ name: string; search: string }> {
+  const name = savedSearchNameForProject(input.projectId);
+  const search = [
+    `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(input.projectId)}" service=payment error_type=ECONNRESET`,
+    "| stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype values(message) as _raw values(root_signal) as root_signal max(redis_pool_waiting) as redis_pool_waiting max(latency_ms) as latency_ms by sentinelProjectId",
+    "| where error_count >= 18",
+    "| eval service=\"payment-service\", severity=\"P1\""
+  ].join(" ");
+  const exists = await savedSearchContent(name);
+  await splunkRestRequest(z.record(z.unknown()).default({}), {
+    method: "POST",
+    path: exists ? `/servicesNS/admin/sentinel/saved/searches/${encodeURIComponent(name)}` : "/servicesNS/admin/sentinel/saved/searches",
+    query: { output_mode: "json" },
+    form: savedSearchForm({ name, search, webhookUrl: input.webhookUrl, includeName: !exists })
+  });
+  const content = await savedSearchContent(name);
+  if (!content || String(content.disabled ?? "1") === "1") {
+    throw new Error(`Splunk saved search ${name} is not enabled`);
+  }
+  if (String(content["action.webhook.param.url"] ?? "") !== input.webhookUrl) {
+    throw new Error(`Splunk saved search ${name} did not store the Sentinel webhook URL`);
+  }
+  return { name, search };
+}
+
+async function ensureProjectRuntimeMemory(input: { orgId: string; projectId: string; apiUrl: string }): Promise<void> {
+  for (const collection of ["services", "service_runtime_configs", "runbooks", "incidents", "postmortems", "audit_log", "remediation_executions", "dead_letter", "rate_limit_windows", "projects"]) {
+    await createCollection(collection, {});
+  }
+  const now = new Date().toISOString();
+  const services = [
+    {
+      _key: `${input.projectId}-payment-service`,
+      orgId: input.orgId,
+      name: "payment-service",
+      team: "payments",
+      language: "Node.js",
+      dependencies: ["redis-cache"],
+      dependents: [],
+      knownFragilePoints: ["Redis connection pool saturation", "checkout latency spikes"],
+      slaMs: 300,
+      owners: ["payments-oncall"],
+      runbookIds: [`${input.projectId}-redis-connection-exhaustion`],
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      _key: `${input.projectId}-redis-cache`,
+      orgId: input.orgId,
+      name: "redis-cache",
+      team: "platform",
+      language: "Redis",
+      dependencies: [],
+      dependents: ["payment-service"],
+      knownFragilePoints: ["connection storms", "maxclients pressure"],
+      slaMs: 25,
+      owners: ["platform-oncall"],
+      runbookIds: [`${input.projectId}-redis-connection-exhaustion`],
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+  for (const service of services) {
+    await insertDocument("services", service, { orgId: input.orgId });
+  }
+  for (const serviceName of ["payment-service", "redis-cache"]) {
+    await insertDocument(
+      "service_runtime_configs",
+      {
+        _key: `${input.projectId}-${serviceName}`,
+        orgId: input.orgId,
+        serviceName,
+        incidentChannel: null,
+        adminBaseUrl: input.apiUrl,
+        cloudRunServiceName: null,
+        createdAt: now,
+        updatedAt: now
+      },
+      { orgId: input.orgId }
+    );
+  }
+  await insertDocument(
+    "runbooks",
+    {
+      _key: `${input.projectId}-redis-connection-exhaustion`,
+      orgId: input.orgId,
+      title: "Redis connection pool recovery for checkout",
+      incidentType: "redis-connection-exhaustion",
+      applicableServices: ["payment-service", "redis-cache"],
+      steps: [
+        {
+          order: 1,
+          action: "Rotate Redis client connection pool",
+          command: "rotate_connection_pool",
+          isExecutable: true,
+          riskLevel: "low"
+        },
+        {
+          order: 2,
+          action: "Notify on-call with investigation context if verification fails",
+          command: "notify_team",
+          isExecutable: true,
+          riskLevel: "low"
+        }
+      ],
+      successCriteria: "New checkout errors drop below 30 percent of the original Splunk error count after the connection pool action.",
+      fallbackAction: "notify_team",
+      createdAt: now,
+      updatedAt: now
+    },
+    { orgId: input.orgId }
+  );
+}
+
+function buildProjectEvents(input: { projectId: string; projectName: string; logs: AppLog[] }): SplunkHECEvent[] {
+  return input.logs.map((log, index) => ({
+    index: "prod",
+    sourcetype: "app",
+    source: "sentinel-browser-test-app",
+    host: `checkout-${(index % 3) + 1}`,
+    time: log.timestamp ? Date.parse(log.timestamp) / 1000 : Date.now() / 1000,
+    event: {
+      sentinelProjectId: input.projectId,
+      projectName: input.projectName,
+      level: log.level,
+      service: log.service,
+      error_type: log.errorName ?? (log.message.includes("ECONNRESET") ? "ECONNRESET" : "OK"),
+      route: log.route ?? "/checkout/confirm",
+      status_code: log.statusCode ?? null,
+      latency_ms: log.latencyMs ?? null,
+      message: log.message,
+      error_stack: log.stack ?? null,
+      trace_id: log.traceId ?? null,
+      requestId: log.requestId ?? null,
+      root_signal: typeof log.metadata.rootSignal === "string" ? log.metadata.rootSignal : "redis_pool_exhaustion_after_econnreset",
+      redis_pool_waiting: typeof log.metadata.redisPoolWaiting === "number" ? log.metadata.redisPoolWaiting : null,
+      deploy_sha: typeof log.metadata.deploySha === "string" ? log.metadata.deploySha : "sentinel-browser-hard-log",
+      browser_triggered: true
+    }
+  }));
+}
+
+async function projectLogCounts(projectId: string): Promise<{ total: number; econnreset: number }> {
+  const spl = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" | stats count as total count(eval(error_type="ECONNRESET")) as econnreset`;
+  const row = (await runSearch(spl, { maxResults: 1 }).catch(() => []))[0] ?? {};
+  return {
+    total: Number(row.total ?? 0),
+    econnreset: Number(row.econnreset ?? 0)
+  };
+}
+
+function incidentMatchesProject(incident: Record<string, unknown>, savedSearchName: string): boolean {
+  const rawPayload = objectRecord(incident.rawPayload) ?? {};
+  return asString(rawPayload.search_name) === savedSearchName || asString(incident.title).includes(savedSearchName);
+}
+
+function savedSearchNameFromAlert(alert: NormalizedAlert): string {
+  const rawPayload = objectRecord(alert.rawPayload) ?? {};
+  return asString(rawPayload.search_name) || asString(alert.incidentType);
+}
+
+function incidentClosed(incident: Record<string, unknown>): boolean {
+  return Boolean(asString(incident.postMortemId) || asString(incident.resolvedAt));
+}
+
+function selectProjectIncident(incidents: Array<Record<string, unknown>>): Record<string, unknown> | null {
+  return [...incidents].sort((left, right) => {
+    const leftClosed = incidentClosed(left);
+    const rightClosed = incidentClosed(right);
+    if (leftClosed !== rightClosed) return leftClosed ? -1 : 1;
+    return timestampMs(right.createdAt) - timestampMs(left.createdAt);
+  })[0] ?? null;
+}
+
+async function existingProjectIncidentForAlert(alert: NormalizedAlert, orgId: string): Promise<Record<string, unknown> | null> {
+  const savedSearchName = savedSearchNameFromAlert(alert);
+  if (!savedSearchName.startsWith(SENTINEL_HUMAN_FLOW_SEARCH_PREFIX)) return null;
+  const incidents = await queryDocuments<Record<string, unknown>>("incidents", {}, 1_000, { orgId });
+  return selectProjectIncident(
+    incidents.filter((incident) => {
+      if (!incidentMatchesProject(incident, savedSearchName)) return false;
+      return asString(incident.status) !== "failed";
+    })
+  );
 }
 
 async function createSentinelIncidentFromAlert(alert: NormalizedAlert, orgId: string): Promise<string> {
@@ -863,6 +1150,15 @@ export function createApp(): express.Express {
       const remediationWaitMs = testControlRemediationWaitMs(req, payload);
       const verifyFailsBeforePass = testControlVerifyFailsBeforePass(req, payload);
       const forceCrashPhase = testControlForceCrashPhase(req, payload);
+      const existingIncident = await existingProjectIncidentForAlert(alert, org.orgId);
+      if (existingIncident) {
+        res.status(202).json({
+          incidentId: asString(existingIncident._key),
+          status: asString(existingIncident.status) || "open",
+          trigger: "splunk-alert-action-deduped"
+        });
+        return;
+      }
       const incidentId = await createSentinelIncidentFromAlert(alert, org.orgId);
       setImmediate(() => {
         runSentinelForIncident({
@@ -878,6 +1174,126 @@ export function createApp(): express.Express {
           });
       });
       res.status(202).json({ incidentId, status: "open", trigger: "splunk-alert-action" });
+    })
+  );
+
+  app.post(
+    "/projects",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const body = createProjectBodySchema.parse(req.body);
+      const webhookUrl = projectWebhookUrl({ configuredUrl: body.webhookUrl, orgId: auth.orgId });
+      const projectId = createKvKey();
+      const savedSearch = await configureProjectSavedSearch({ projectId, webhookUrl });
+      const now = new Date().toISOString();
+      const project = {
+        _key: projectId,
+        orgId: auth.orgId,
+        name: body.name.trim(),
+        service: body.service,
+        environment: body.environment,
+        ingestUrl: `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/projects/${projectId}/logs`,
+        savedSearchName: savedSearch.name,
+        savedSearch,
+        createdAt: now,
+        updatedAt: now
+      };
+      await ensureProjectRuntimeMemory({
+        orgId: auth.orgId,
+        projectId,
+        apiUrl: process.env.AGENT_TOOL_EXECUTION_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"
+      });
+      await insertDocument("projects", project, { orgId: auth.orgId });
+      res.status(201).json({ project });
+    })
+  );
+
+  app.post(
+    "/projects/:id/logs",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const projectId = typeof req.params.id === "string" ? req.params.id : "";
+      const project = await getDocument<Record<string, unknown>>("projects", projectId, { orgId: auth.orgId });
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const body = ingestProjectLogsBodySchema.parse(req.body);
+      const events = buildProjectEvents({
+        projectId,
+        projectName: asString(project.name),
+        logs: body.logs
+      });
+      await sendEvent(events);
+      await updateDocument("projects", projectId, {
+        lastLogBatchAt: new Date().toISOString(),
+        lastAcceptedCount: events.length,
+        updatedAt: new Date().toISOString()
+      }, { orgId: auth.orgId });
+      res.status(202).json({
+        accepted: events.length,
+        projectId,
+        splunk: "stored",
+        savedSearchName: asString(project.savedSearchName)
+      });
+    })
+  );
+
+  app.get(
+    "/projects/:id/flow",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const projectId = typeof req.params.id === "string" ? req.params.id : "";
+      const project = await getDocument<Record<string, unknown>>("projects", projectId, { orgId: auth.orgId });
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const savedSearchName = asString(project.savedSearchName);
+      const [logs, incidents] = await Promise.all([
+        projectLogCounts(projectId),
+        queryDocuments<Record<string, unknown>>("incidents", {}, 1_000, { orgId: auth.orgId })
+      ]);
+      const matchedIncidents = incidents
+        .filter((incident) => incidentMatchesProject(incident, savedSearchName))
+        .sort((left, right) => timestampMs(right.createdAt) - timestampMs(left.createdAt));
+      const latestIncident = selectProjectIncident(matchedIncidents);
+      const incidentId = asString(latestIncident?._key);
+      const [audit, postmortems] = incidentId
+        ? await Promise.all([
+            queryDocuments<Record<string, unknown>>("audit_log", { incidentId }, 100, { orgId: auth.orgId }).catch(() => []),
+            queryDocuments<Record<string, unknown>>("postmortems", { incidentId }, 10, { orgId: auth.orgId }).catch(() => [])
+          ])
+        : [[], []];
+      const phases = audit.map((entry) => asString(entry.phase)).filter(Boolean);
+      res.json({
+        project,
+        counts: {
+          logsStored: logs.total,
+          econnresetLogs: logs.econnreset,
+          incidents: matchedIncidents.length,
+          auditEntries: audit.length,
+          postmortems: postmortems.length
+        },
+        latestSavedSearch: {
+          name: savedSearchName,
+          webhookConfigured: true
+        },
+        incident: latestIncident ? serializeSentinelIncident(latestIncident) : null,
+        postmortem: postmortems[0] ? serializeSentinelPostmortem(postmortems[0]!) : null,
+        audit: audit.map(serializeAuditEntry).sort((left, right) => timestampMs(left.timestamp) - timestampMs(right.timestamp)),
+        stages: {
+          appLogsStored: logs.total > 0,
+          splunkWatchedAndWebhookFired: matchedIncidents.length > 0,
+          sentinelActed: phases.includes("ACT"),
+          sentinelVerified: phases.includes("VERIFY"),
+          sentinelClosed: phases.includes("CLOSE"),
+          splunkPostmortemStored: postmortems.length > 0
+        }
+      });
     })
   );
 

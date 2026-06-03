@@ -142,6 +142,63 @@ export interface SplunkOverview {
   serviceHealth: Array<{ service: string; eventCount: number; errorCount: number; errorRate: number }>;
 }
 
+export interface Project {
+  _key: string;
+  orgId: string;
+  name: string;
+  service: string;
+  environment: string;
+  ingestUrl: string;
+  savedSearchName: string;
+  savedSearch?: {
+    name: string;
+    search: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectLogInput {
+  level: "debug" | "info" | "warn" | "error" | "fatal";
+  service: string;
+  message: string;
+  stack?: string;
+  errorName?: string;
+  traceId?: string;
+  requestId?: string;
+  route?: string;
+  statusCode?: number;
+  latencyMs?: number;
+  timestamp?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface ProjectFlow {
+  project: Project;
+  counts: {
+    logsStored: number;
+    econnresetLogs: number;
+    incidents: number;
+    auditEntries: number;
+    postmortems: number;
+  };
+  latestSavedSearch: {
+    name: string;
+    webhookConfigured: boolean;
+  };
+  incident: Incident | null;
+  postmortem: Postmortem | null;
+  audit: AuditEntry[];
+  stages: {
+    appLogsStored: boolean;
+    splunkWatchedAndWebhookFired: boolean;
+    sentinelActed: boolean;
+    sentinelVerified: boolean;
+    sentinelClosed: boolean;
+    splunkPostmortemStored: boolean;
+  };
+}
+
 function emitAuthChanged(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
@@ -275,6 +332,21 @@ export async function fetchRuntimeReadiness(): Promise<RuntimeReadiness> {
 
 export async function fetchSplunkOverview(): Promise<SplunkOverview> {
   return requestJson<SplunkOverview>("/splunk/overview");
+}
+
+export async function createProject(input: { name: string; service: string; environment: string; webhookUrl: string }): Promise<{ project: Project }> {
+  return requestJson<{ project: Project }>("/projects", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function ingestProjectLogs(projectId: string, logs: ProjectLogInput[]): Promise<{ accepted: number; projectId: string; splunk: string; savedSearchName: string }> {
+  return requestJson<{ accepted: number; projectId: string; splunk: string; savedSearchName: string }>(`/projects/${projectId}/logs`, {
+    method: "POST",
+    body: JSON.stringify({ logs })
+  });
+}
+
+export async function fetchProjectFlow(projectId: string): Promise<ProjectFlow> {
+  return requestJson<ProjectFlow>(`/projects/${projectId}/flow`);
 }
 
 export function apiUrl(path: string): string {

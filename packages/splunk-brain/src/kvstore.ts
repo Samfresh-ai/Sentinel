@@ -11,6 +11,7 @@ const ORG_SCOPED_COLLECTIONS = new Set([
   "incidents",
   "services",
   "service_runtime_configs",
+  "projects",
   "runbooks",
   "patterns",
   "postmortems",
