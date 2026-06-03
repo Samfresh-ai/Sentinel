@@ -136,7 +136,7 @@ function corsOptions(): Parameters<typeof cors>[0] {
   const allowedOrigins = configuredCorsOrigins();
   return {
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "x-sentinel-secret", "x-sentinel-tool-secret"],
+    allowedHeaders: ["Authorization", "Content-Type", "x-sentinel-secret", "x-sentinel-tool-secret", "x-sentinel-remediation-secret"],
     origin(origin: string | undefined, callback: CorsOriginCallback) {
       if (!origin || allowedOrigins.has(origin.replace(/\/+$/, ""))) {
         callback(null, true);
@@ -147,25 +147,40 @@ function corsOptions(): Parameters<typeof cors>[0] {
   };
 }
 
-function verifyToolSecret(req: Request): void {
-  const expected = process.env.AGENT_TOOL_SECRET ?? process.env.WEBHOOK_SECRET;
-  if (!expected) {
-    throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required for agent tool execution");
-  }
+function requestSecret(req: Request, headerName: string): string {
   const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const explicit = req.header("x-sentinel-tool-secret") ?? "";
-  const actual = bearer.length > 0 ? bearer : explicit;
+  const explicit = req.header(headerName) ?? "";
+  return bearer.length > 0 ? bearer : explicit;
+}
+
+function verifySharedSecret(expected: string | undefined, actual: string, label: string): void {
+  if (!expected) {
+    throw new Error(`${label} is required`);
+  }
   const expectedBuffer = Buffer.from(expected);
   const actualBuffer = Buffer.from(actual);
   if (expectedBuffer.length !== actualBuffer.length || !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
-    const error = new Error("Invalid agent tool secret");
+    const error = new Error(`Invalid ${label}`);
     error.name = "Unauthorized";
     throw error;
   }
 }
 
+function verifyToolSecret(req: Request): void {
+  verifySharedSecret(process.env.AGENT_TOOL_SECRET, requestSecret(req, "x-sentinel-tool-secret"), "AGENT_TOOL_SECRET");
+}
+
+function verifyAdminRemediationSecret(req: Request): void {
+  verifySharedSecret(
+    process.env.SENTINEL_ADMIN_REMEDIATION_SECRET,
+    requestSecret(req, "x-sentinel-remediation-secret"),
+    "SENTINEL_ADMIN_REMEDIATION_SECRET"
+  );
+}
+
 const SENTINEL_AUTONOMOUS_PAYMENT_SEARCH = "sentinel_auto_detect_payment_errors";
 const SENTINEL_HUMAN_FLOW_SEARCH_PREFIX = "sentinel_human_flow_";
+const PROJECT_LOG_SOURCETYPE = "sentinel:project-app-log";
 
 function severityFromSplunk(value: string | undefined): "P1" | "P2" | "P3" | "P4" {
   const normalized = value?.toUpperCase() ?? "";
@@ -351,8 +366,60 @@ async function checkSplunkWebhookRateLimit(orgId: string): Promise<{ allowed: bo
   return { allowed: true, retryAfter: 0 };
 }
 
+async function checkProjectLogRateLimit(orgId: string, projectId: string): Promise<{ allowed: boolean; retryAfter: number }> {
+  await createCollection("rate_limit_windows", {});
+  const key = `project-logs-${orgId}-${projectId}`;
+  const now = Date.now();
+  const current = await getDocument<Record<string, unknown>>("rate_limit_windows", key).catch(() => null);
+  const windowStartMs = typeof current?.windowStart === "string" ? Date.parse(current.windowStart) : Number.NaN;
+  const inWindow = Number.isFinite(windowStartMs) && now - windowStartMs < 60_000;
+  const nextCount = inWindow && typeof current?.count === "number" ? current.count + 1 : 1;
+  const document = {
+    _key: key,
+    orgId,
+    projectId,
+    windowStart: inWindow && typeof current?.windowStart === "string" ? current.windowStart : new Date(now).toISOString(),
+    count: nextCount
+  };
+  if (current) {
+    await updateDocument("rate_limit_windows", key, document);
+  } else {
+    await insertDocument("rate_limit_windows", document);
+  }
+  if (nextCount > 5) {
+    void writeAuditEntry({
+      orgId,
+      incidentId: `project-log-rate-limit-${projectId}`,
+      timestamp: new Date().toISOString(),
+      phase: "RATE_LIMITED",
+      toolCalled: null,
+      input: { endpoint: `/projects/${projectId}/logs`, orgId, projectId },
+      output: { count: nextCount },
+      confidenceScore: null,
+      durationMs: 0,
+      success: false,
+      errorMessage: "Project log ingestion rate limit exceeded"
+    });
+    return { allowed: false, retryAfter: 60 };
+  }
+  return { allowed: true, retryAfter: 0 };
+}
+
 function quoteSplunk(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+function sentinelSplunkIndex(): string {
+  return (process.env.SPLUNK_INDEX ?? "sentinel").trim() || "sentinel";
+}
+
+function projectLogSearchFilter(input: { orgId: string; projectId: string }): string {
+  return [
+    `index="${quoteSplunk(sentinelSplunkIndex())}"`,
+    `sourcetype="${PROJECT_LOG_SOURCETYPE}"`,
+    `orgId="${quoteSplunk(input.orgId)}"`,
+    `sentinelProjectId="${quoteSplunk(input.projectId)}"`
+  ].join(" ");
 }
 
 function sanitizedSearchPart(value: string): string {
@@ -405,10 +472,10 @@ async function savedSearchContent(name: string): Promise<Record<string, unknown>
   return response?.entry?.[0]?.content ?? null;
 }
 
-async function configureProjectSavedSearch(input: { projectId: string; webhookUrl: string }): Promise<{ name: string; search: string }> {
+async function configureProjectSavedSearch(input: { orgId: string; projectId: string; webhookUrl: string }): Promise<{ name: string; search: string }> {
   const name = savedSearchNameForProject(input.projectId);
   const search = [
-    `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(input.projectId)}" service=payment error_type=ECONNRESET`,
+    `${projectLogSearchFilter(input)} (service=payment OR service="payment-service") error_type=ECONNRESET`,
     "| stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype values(message) as _raw values(root_signal) as root_signal max(redis_pool_waiting) as redis_pool_waiting max(latency_ms) as latency_ms by sentinelProjectId",
     "| where error_count >= 18",
     "| eval service=\"payment-service\", severity=\"P1\""
@@ -519,14 +586,15 @@ async function ensureProjectRuntimeMemory(input: { orgId: string; projectId: str
   );
 }
 
-function buildProjectEvents(input: { projectId: string; projectName: string; logs: AppLog[] }): SplunkHECEvent[] {
+function buildProjectEvents(input: { orgId: string; projectId: string; projectName: string; logs: AppLog[] }): SplunkHECEvent[] {
   return input.logs.map((log, index) => ({
-    index: "prod",
-    sourcetype: "app",
+    index: sentinelSplunkIndex(),
+    sourcetype: PROJECT_LOG_SOURCETYPE,
     source: "sentinel-browser-test-app",
     host: `checkout-${(index % 3) + 1}`,
     time: log.timestamp ? Date.parse(log.timestamp) / 1000 : Date.now() / 1000,
     event: {
+      orgId: input.orgId,
       sentinelProjectId: input.projectId,
       projectName: input.projectName,
       level: log.level,
@@ -547,8 +615,8 @@ function buildProjectEvents(input: { projectId: string; projectName: string; log
   }));
 }
 
-async function projectLogCounts(projectId: string): Promise<{ total: number; econnreset: number }> {
-  const spl = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" | stats count as total count(eval(error_type="ECONNRESET")) as econnreset`;
+async function projectLogCounts(orgId: string, projectId: string): Promise<{ total: number; econnreset: number }> {
+  const spl = `${projectLogSearchFilter({ orgId, projectId })} | stats count as total count(eval(error_type="ECONNRESET")) as econnreset`;
   const row = (await runSearch(spl, { maxResults: 1 }).catch(() => []))[0] ?? {};
   return {
     total: Number(row.total ?? 0),
@@ -901,19 +969,38 @@ async function notifyDlqFailure(incident: Record<string, unknown>, orgId: string
   });
 }
 
-async function flushDeadLetterQueue(options: { force?: boolean } = {}): Promise<{ retried: number; failed: number; scanned: number }> {
+function deadLetterKey(orgId: string, incidentId: string): string {
+  return crypto.createHash("sha256").update(`${orgId}:${incidentId}`).digest("hex");
+}
+
+async function getDeadLetterRecord(orgId: string, incidentId: string): Promise<{ key: string; doc: Record<string, unknown> | null }> {
+  const scopedKey = deadLetterKey(orgId, incidentId);
+  const current = await getDocument<Record<string, unknown>>("dead_letter", scopedKey, { orgId }).catch(() => null);
+  if (current) return { key: scopedKey, doc: current };
+
+  const legacy = await getDocument<Record<string, unknown>>("dead_letter", incidentId, { orgId }).catch(() => null);
+  if (legacy && asString(legacy.orgId) === orgId) return { key: incidentId, doc: legacy };
+  return { key: scopedKey, doc: null };
+}
+
+async function flushDeadLetterQueue(options: { force?: boolean; orgId?: string } = {}): Promise<{ retried: number; failed: number; scanned: number }> {
   await createCollection("dead_letter", {});
   const staleBefore = Date.now() - 5 * 60_000;
-  const incidents = await queryAllDocuments<Record<string, unknown>>("incidents", { status: "in_progress" }, 1_000).catch(() => []);
+  const incidents = await (
+    options.orgId
+      ? queryDocuments<Record<string, unknown>>("incidents", { status: "in_progress" }, 1_000, { orgId: options.orgId })
+      : queryAllDocuments<Record<string, unknown>>("incidents", { status: "in_progress" }, 1_000)
+  ).catch(() => []);
   let retried = 0;
   let failed = 0;
   for (const incident of incidents) {
     const incidentId = asString(incident._key);
     const orgId = asString(incident.orgId);
+    if (options.orgId && orgId !== options.orgId) continue;
     const updatedAt = timestampMs(incident.updatedAt);
     if (!incidentId || !orgId || (!options.force && updatedAt >= staleBefore)) continue;
-    const currentDlq = await getDocument<Record<string, unknown>>("dead_letter", incidentId).catch(() => null);
-    const attemptCount = asNumber(currentDlq?.attemptCount) ?? 0;
+    const currentDlq = await getDeadLetterRecord(orgId, incidentId);
+    const attemptCount = asNumber(currentDlq.doc?.attemptCount) ?? 0;
     if (attemptCount >= 3) {
       await updateSentinelIncident(incidentId, orgId, { status: "failed" });
       void writeAuditEntry({
@@ -935,20 +1022,20 @@ async function flushDeadLetterQueue(options: { force?: boolean } = {}): Promise<
     }
     const nextAttempt = attemptCount + 1;
     const dlqDocument = {
-      ...(currentDlq ?? {}),
-      _key: incidentId,
+      ...(currentDlq.doc ?? {}),
+      _key: currentDlq.key,
       orgId,
       incidentId,
-      errorMessage: typeof currentDlq?.errorMessage === "string" ? currentDlq.errorMessage : "Stale in_progress Sentinel incident",
-      stackTrace: typeof currentDlq?.stackTrace === "string" ? currentDlq.stackTrace : "",
+      errorMessage: typeof currentDlq.doc?.errorMessage === "string" ? currentDlq.doc.errorMessage : "Stale in_progress Sentinel incident",
+      stackTrace: typeof currentDlq.doc?.stackTrace === "string" ? currentDlq.doc.stackTrace : "",
       attemptCount: nextAttempt,
       lastAttempt: new Date().toISOString(),
-      createdAt: typeof currentDlq?.createdAt === "string" ? currentDlq.createdAt : new Date().toISOString()
+      createdAt: typeof currentDlq.doc?.createdAt === "string" ? currentDlq.doc.createdAt : new Date().toISOString()
     };
-    if (currentDlq) {
-      await updateDocument("dead_letter", incidentId, dlqDocument);
+    if (currentDlq.doc) {
+      await updateDocument("dead_letter", currentDlq.key, dlqDocument, { orgId });
     } else {
-      await insertDocument("dead_letter", dlqDocument);
+      await insertDocument("dead_letter", dlqDocument, { orgId });
     }
     void writeAuditEntry({
       orgId,
@@ -1185,7 +1272,7 @@ export function createApp(): express.Express {
       const body = createProjectBodySchema.parse(req.body);
       const webhookUrl = projectWebhookUrl({ configuredUrl: body.webhookUrl, orgId: auth.orgId });
       const projectId = createKvKey();
-      const savedSearch = await configureProjectSavedSearch({ projectId, webhookUrl });
+      const savedSearch = await configureProjectSavedSearch({ orgId: auth.orgId, projectId, webhookUrl });
       const now = new Date().toISOString();
       const project = {
         _key: projectId,
@@ -1220,8 +1307,15 @@ export function createApp(): express.Express {
         res.status(404).json({ error: "Project not found" });
         return;
       }
+      const rateLimit = await checkProjectLogRateLimit(auth.orgId, projectId);
+      if (!rateLimit.allowed) {
+        res.setHeader("Retry-After", String(rateLimit.retryAfter));
+        res.status(429).json({ error: "Rate limit exceeded" });
+        return;
+      }
       const body = ingestProjectLogsBodySchema.parse(req.body);
       const events = buildProjectEvents({
+        orgId: auth.orgId,
         projectId,
         projectName: asString(project.name),
         logs: body.logs
@@ -1254,7 +1348,7 @@ export function createApp(): express.Express {
       }
       const savedSearchName = asString(project.savedSearchName);
       const [logs, incidents] = await Promise.all([
-        projectLogCounts(projectId),
+        projectLogCounts(auth.orgId, projectId),
         queryDocuments<Record<string, unknown>>("incidents", {}, 1_000, { orgId: auth.orgId })
       ]);
       const matchedIncidents = incidents
@@ -1333,7 +1427,7 @@ export function createApp(): express.Express {
   app.post(
     "/admin/remediation",
     asyncHandler(async (req, res) => {
-      verifyToolSecret(req);
+      verifyAdminRemediationSecret(req);
       const body = adminRemediationBodySchema.parse(req.body);
       const acceptedAt = new Date().toISOString();
       const incidentId = typeof body.parameters.incidentId === "string" ? body.parameters.incidentId : null;
@@ -1589,8 +1683,9 @@ export function createApp(): express.Express {
   app.post(
     "/admin/dlq/flush",
     requireAuth,
-    asyncHandler(async (_req, res) => {
-      const result = await flushDeadLetterQueue({ force: true });
+    asyncHandler(async (req, res) => {
+      const auth = (req as AuthenticatedRequest).auth ?? verifyAuth(req);
+      const result = await flushDeadLetterQueue({ force: true, orgId: auth.orgId });
       res.json(result);
     })
   );

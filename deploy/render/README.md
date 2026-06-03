@@ -23,6 +23,8 @@ NVIDIA_API_KEY=<secret>
 JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>
+SENTINEL_ADMIN_REMEDIATION_SECRET=<different-secret>
+SENTINEL_ADMIN_REMEDIATION_ALLOWED_ORIGINS=https://<sentinel-api-url>
 PUBLIC_APP_URL=https://<sentinel-live-url>
 API_PUBLIC_URL=https://<sentinel-api-url>
 NEXT_PUBLIC_API_URL=https://<sentinel-api-url>
@@ -54,6 +56,7 @@ SPLUNK_USERNAME=<secret>
 SPLUNK_PASSWORD=<secret>
 SPLUNK_HEC_TOKEN=<secret>
 SPLUNK_GATEWAY_TOKEN=<secret>
+SPLUNK_GATEWAY_MAX_BODY_BYTES=10485760
 SPLUNK_CF_ACCESS_CLIENT_ID=
 SPLUNK_CF_ACCESS_CLIENT_SECRET=
 ```
@@ -69,7 +72,7 @@ SPLUNK_CLOUD_STACK_HOST=<stack>.splunkcloud.com
 SPLUNK_USERNAME=<secret>
 SPLUNK_PASSWORD=<secret>
 SPLUNK_HEC_TOKEN=<secret>
-SPLUNK_CA_CERT=<optional PEM CA if required>
+SPLUNK_CA_CERT=<optional PEM CA if required and the certificate hostname matches the configured Splunk endpoint>
 SPLUNK_MGMT_URL=
 SPLUNK_HEC_URL=
 SPLUNK_GATEWAY_TOKEN=
@@ -77,7 +80,7 @@ SPLUNK_CF_ACCESS_CLIENT_ID=
 SPLUNK_CF_ACCESS_CLIENT_SECRET=
 ```
 
-Sentinel derives management API through Splunk Web and HEC on `:8088`. If Splunk provides separate REST/HEC endpoints, set `SPLUNK_MGMT_URL` and `SPLUNK_HEC_URL` explicitly.
+Sentinel derives management API through Splunk Web and HEC on `:8088`. If Splunk provides separate REST/HEC endpoints, set `SPLUNK_MGMT_URL` and `SPLUNK_HEC_URL` explicitly. Do not disable hostname verification for Splunk Cloud or private-CA endpoints; use the hostname that appears on the certificate.
 
 ## Readiness
 

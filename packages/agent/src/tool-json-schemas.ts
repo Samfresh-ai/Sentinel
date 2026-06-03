@@ -34,10 +34,10 @@ export const getServiceDependencyGraphSchema: JsonSchema = {
 
 export const querySplunkLogsSchema: JsonSchema = {
   type: "object",
-  required: ["description"],
+  required: ["services", "description"],
+  additionalProperties: false,
   properties: {
-    spl: { type: "string", description: "Targeted SPL search to run against recent Splunk events" },
-    services: { type: "array", items: { type: "string" }, description: "Services to investigate with one SPL query per service" },
+    services: { type: "array", items: { type: "string" }, description: "Services to investigate with bounded generated service-signal searches" },
     symptoms: { type: "array", items: { type: "string" }, description: "Symptoms used to focus multi-service signal searches" },
     timeRange: {
       type: "object",

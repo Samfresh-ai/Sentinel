@@ -26,13 +26,18 @@ function isLocalUrl(value: string): boolean {
   }
 }
 
+function parsedUrl(value: string): URL | null {
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
 function endpointHostname(value: string): string {
   if (!value) return "";
-  try {
-    return new URL(value).hostname;
-  } catch {
-    return value;
-  }
+  return parsedUrl(value)?.hostname ?? value;
 }
 
 function isLocalEndpoint(value: string): boolean {
@@ -43,6 +48,19 @@ function isLocalEndpoint(value: string): boolean {
 function isLocalHostname(value: string): boolean {
   const hostname = value.trim().toLowerCase();
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function isPlainHttpUrl(value: string): boolean {
+  return parsedUrl(value)?.protocol === "http:";
+}
+
+function isExplicitHttpsUrl(value: string): boolean {
+  return parsedUrl(value)?.protocol === "https:";
+}
+
+function nonLocalEndpointUsesPlainHttp(value: string): boolean {
+  if (!value || !isPlainHttpUrl(value)) return false;
+  return !isLocalHostname(endpointHostname(value));
 }
 
 export function isLocalVerificationMode(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -101,8 +119,8 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   if (remediationBackend === "cloud-run" && !hasEnv(env, "GOOGLE_CLOUD_PROJECT_ID")) {
     violations.push("GOOGLE_CLOUD_PROJECT_ID is required when remediation backend is cloud-run");
   }
-  if (remediationBackend === "admin-endpoint" && !hasEnv(env, "AGENT_TOOL_SECRET") && !hasEnv(env, "WEBHOOK_SECRET")) {
-    violations.push("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when remediation backend is admin-endpoint");
+  if (remediationBackend === "admin-endpoint" && !hasEnv(env, "SENTINEL_ADMIN_REMEDIATION_SECRET")) {
+    violations.push("SENTINEL_ADMIN_REMEDIATION_SECRET is required when remediation backend is admin-endpoint");
   }
   const publicAppUrl = envValue(env, "PUBLIC_APP_URL");
   if (!publicAppUrl || isLocalUrl(publicAppUrl)) {
@@ -121,6 +139,22 @@ export function productionReadinessViolations(env: NodeJS.ProcessEnv = process.e
   }
   if (isLocalEndpoint(splunkHecEndpoint)) {
     violations.push("SPLUNK_HEC_URL or SPLUNK_HOST must point to a reachable non-local Splunk HEC endpoint in production");
+  }
+  if (nonLocalEndpointUsesPlainHttp(envValue(env, "SPLUNK_MGMT_URL"))) {
+    violations.push("SPLUNK_MGMT_URL must use HTTPS for non-local Splunk management endpoints in production");
+  }
+  if (nonLocalEndpointUsesPlainHttp(envValue(env, "SPLUNK_HEC_URL"))) {
+    violations.push("SPLUNK_HEC_URL must use HTTPS for non-local Splunk HEC endpoints in production");
+  }
+  if (!envValue(env, "SPLUNK_HEC_URL") && !splunkCloudStackHost && !isLocalHostname(splunkHost) && envValue(env, "SPLUNK_HEC_PROTOCOL").toLowerCase() === "http") {
+    violations.push("SPLUNK_HEC_PROTOCOL=https is required for non-local Splunk HEC endpoints in production");
+  }
+  if (envValue(env, "SPLUNK_TLS_REJECT_UNAUTHORIZED").toLowerCase() === "false") {
+    const nonLocalMgmt = !isLocalEndpoint(splunkMgmtEndpoint);
+    const nonLocalHec = !isLocalEndpoint(splunkHecEndpoint);
+    if (nonLocalMgmt || nonLocalHec || isExplicitHttpsUrl(splunkMgmtEndpoint) || isExplicitHttpsUrl(splunkHecEndpoint)) {
+      violations.push("SPLUNK_TLS_REJECT_UNAUTHORIZED=false is not allowed for production Splunk endpoints");
+    }
   }
   for (const key of ["SPLUNK_USERNAME", "SPLUNK_PASSWORD", "SPLUNK_HEC_TOKEN"]) {
     if (!hasEnv(env, key)) violations.push(`${key} is required for production Splunk access`);

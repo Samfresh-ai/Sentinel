@@ -191,6 +191,7 @@ SPLUNK_HOST=splunk.yourdomain.com
 SPLUNK_MGMT_URL=https://splunk.yourdomain.com
 SPLUNK_HEC_URL=https://splunk.yourdomain.com
 SPLUNK_GATEWAY_TOKEN=<tunnel-auth-token>
+SPLUNK_GATEWAY_MAX_BODY_BYTES=10485760
 SPLUNK_USERNAME=admin
 SPLUNK_PASSWORD=<secret>
 SPLUNK_HEC_TOKEN=<hec-token>

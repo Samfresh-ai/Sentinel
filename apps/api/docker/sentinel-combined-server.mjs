@@ -41,9 +41,16 @@ const web = startChild("sentinel-web", process.execPath, ["apps/web/server.js"],
   }
 });
 
-function routeToWeb(req) {
+function parseRequestPathname(req) {
+  try {
+    return new URL(req.url ?? "/", "http://sentinel.local").pathname;
+  } catch {
+    return null;
+  }
+}
+
+function routeToWeb(req, pathname) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  const pathname = new URL(req.url ?? "/", "http://sentinel.local").pathname;
   const acceptsHtml = String(req.headers.accept ?? "").includes("text/html");
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/" || pathname === "/setup") return true;
@@ -84,7 +91,13 @@ function proxy(req, res, target) {
 }
 
 const server = http.createServer((req, res) => {
-  proxy(req, res, routeToWeb(req) ? webOrigin : apiOrigin);
+  const pathname = parseRequestPathname(req);
+  if (pathname === null) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid request target" }));
+    return;
+  }
+  proxy(req, res, routeToWeb(req, pathname) ? webOrigin : apiOrigin);
 });
 
 server.listen(publicPort, "0.0.0.0", () => {

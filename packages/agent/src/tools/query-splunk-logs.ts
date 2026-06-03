@@ -4,17 +4,17 @@ import { querySplunkLogsSchema, type AgentToolDefinition } from "../tool-json-sc
 import { invocationFailed, invocationFinished, invocationStarted } from "./common.js";
 
 export const querySplunkLogsInputSchema = z.object({
-  spl: z.string().min(1).optional(),
-  services: z.array(z.string().min(1)).optional(),
+  services: z.array(z.string().min(1)).min(1).max(5),
   symptoms: z.array(z.string().min(1)).optional(),
   timeRange: z
     .object({
       earliest: z.string().min(1),
       latest: z.string().min(1)
     })
+    .strict()
     .optional(),
   description: z.string().min(1).default("Investigating current Splunk signals.")
-});
+}).strict();
 
 export interface ServiceSignal {
   service: string;
@@ -81,29 +81,20 @@ export async function querySplunkLogs(input: unknown): Promise<QuerySplunkLogsRe
   const parsed = querySplunkLogsInputSchema.parse(input);
   invocationStarted("query_splunk_logs", parsed);
   try {
-    if (parsed.services && parsed.services.length > 0) {
-      const signals: ServiceSignal[] = [];
-      const allResults: SplunkSearchResult[] = [];
-      for (const service of parsed.services.slice(0, 5)) {
-        const spl = serviceSignalSpl(service, parsed.symptoms ?? []);
-        const results = await splunkSearch(spl, parsed.timeRange?.earliest, parsed.timeRange?.latest);
-        signals.push(signalFromResults(service, spl, results));
-        allResults.push(...results.map((row) => ({ ...row, service })));
-      }
-      const result = {
-        results: allResults,
-        eventCount: signals.reduce((sum, signal) => sum + signal.errorCount, 0),
-        spl: "multi-signal",
-        serviceSignals: signals
-      };
-      invocationFinished("query_splunk_logs", result);
-      return result;
+    const signals: ServiceSignal[] = [];
+    const allResults: SplunkSearchResult[] = [];
+    for (const service of parsed.services.slice(0, 5)) {
+      const spl = serviceSignalSpl(service, parsed.symptoms ?? []);
+      const results = await splunkSearch(spl, parsed.timeRange?.earliest, parsed.timeRange?.latest);
+      signals.push(signalFromResults(service, spl, results));
+      allResults.push(...results.map((row) => ({ ...row, service })));
     }
-    if (!parsed.spl) {
-      throw new Error("query_splunk_logs requires either spl or services");
-    }
-    const results = await splunkSearch(parsed.spl, parsed.timeRange?.earliest, parsed.timeRange?.latest);
-    const result = { results, eventCount: results.length, spl: parsed.spl };
+    const result = {
+      results: allResults,
+      eventCount: signals.reduce((sum, signal) => sum + signal.errorCount, 0),
+      spl: "multi-signal",
+      serviceSignals: signals
+    };
     invocationFinished("query_splunk_logs", result);
     return result;
   } catch (error: unknown) {
@@ -114,6 +105,6 @@ export async function querySplunkLogs(input: unknown): Promise<QuerySplunkLogsRe
 
 export const querySplunkLogsDefinition: AgentToolDefinition = {
   name: "query_splunk_logs",
-  description: "Run a targeted SPL search against live Splunk events and return typed results.",
+  description: "Run bounded service-signal searches against live Splunk events and return typed results.",
   inputSchema: querySplunkLogsSchema
 };

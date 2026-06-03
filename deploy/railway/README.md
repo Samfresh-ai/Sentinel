@@ -44,6 +44,8 @@ NVIDIA_API_KEY=<secret>
 JWT_SECRET=<secret>
 WEBHOOK_SECRET=<secret>
 AGENT_TOOL_SECRET=<secret>
+SENTINEL_ADMIN_REMEDIATION_SECRET=<different-secret>
+SENTINEL_ADMIN_REMEDIATION_ALLOWED_ORIGINS=https://<sentinel-api-domain>
 PUBLIC_APP_URL=https://<sentinel-web-domain>
 API_PUBLIC_URL=https://<sentinel-api-domain>
 NEXT_PUBLIC_API_URL=https://<sentinel-api-domain>
@@ -92,7 +94,7 @@ That means `scale_service`, `restart_pod`, `purge_cache`, and `rotate_connection
 
 ```text
 POST <adminBaseUrl>/admin/remediation
-Authorization: Bearer <AGENT_TOOL_SECRET>
+Authorization: Bearer <SENTINEL_ADMIN_REMEDIATION_SECRET>
 ```
 
 with JSON:
@@ -108,6 +110,7 @@ with JSON:
 ```
 
 This is intentionally fail-closed. If `service_runtime_configs.<service>.adminBaseUrl` is missing, Sentinel records a failed remediation instead of pretending an action happened.
+Admin endpoint URLs must use HTTPS in production and must match `SENTINEL_ADMIN_REMEDIATION_ALLOWED_ORIGINS` when that allowlist is configured. `AGENT_TOOL_SECRET` stays internal to Sentinel's agent tool API.
 
 ## Autonomous Splunk Flow
 

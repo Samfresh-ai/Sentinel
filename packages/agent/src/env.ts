@@ -33,6 +33,8 @@ const agentEnvSchema = z.object({
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   WEBHOOK_SECRET: optionalNonEmptyString,
   AGENT_TOOL_SECRET: optionalNonEmptyString,
+  SENTINEL_ADMIN_REMEDIATION_SECRET: optionalNonEmptyString,
+  SENTINEL_ADMIN_REMEDIATION_ALLOWED_ORIGINS: optionalNonEmptyString,
   SENTINEL_REMEDIATION_BACKEND: z.enum(["cloud-run", "admin-endpoint"]).default("cloud-run"),
   CLOUD_RUN_REMEDIATION_JOB_PREFIX: z.string().min(1).default("sentinel-remediate"),
   AGENT_NAME: z.string().min(1).default("Sentinel")

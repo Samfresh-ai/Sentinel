@@ -16,7 +16,8 @@ const ORG_SCOPED_COLLECTIONS = new Set([
   "patterns",
   "postmortems",
   "audit_log",
-  "remediation_executions"
+  "remediation_executions",
+  "dead_letter"
 ]);
 
 export interface KvStoreOptions {

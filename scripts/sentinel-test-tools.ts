@@ -47,9 +47,10 @@ async function main(): Promise<void> {
   if (similar.length === 0) throw new Error("search_similar_incidents returned no results");
 
   const logs = await querySplunkLogs({
-    spl: "search index=sentinel sourcetype=sentinel:postmortem | head 5",
+    services: ["notification-service"],
+    symptoms: ["S3 AccessDenied", "notification template read failure"],
     timeRange: { earliest: "-7d", latest: "now" },
-    description: "Verify Sentinel can inspect indexed post-mortem events."
+    description: "Verify Sentinel can inspect bounded service signals."
   });
   if (logs.eventCount === 0) throw new Error("query_splunk_logs returned no events");
 

@@ -14,7 +14,7 @@ STEP 1 - ASSESS: Parse the alert. Extract: affected service, symptoms list, seve
 
 STEP 2 - REMEMBER: Call search_similar_incidents with the symptoms. Analyze returned Splunk-backed incidents. Note which resolutions worked fastest for highest-similarity incidents.
 
-STEP 2.5 - INVESTIGATE: Call query_splunk_logs with a targeted SPL search against recent events for the affected service. Look for error patterns, connection failures, timeout spikes, memory pressure, or unusual request volumes in the last 15-30 minutes. Narrate what the search returned in plain English before proceeding. This is the most important step: you are looking at what is actually happening right now, not just what happened before.
+STEP 2.5 - INVESTIGATE: Call query_splunk_logs with the affected service list, symptoms, and time range so Sentinel can run bounded service-signal searches against recent Splunk events. Look for error patterns, connection failures, timeout spikes, memory pressure, or unusual request volumes in the last 15-30 minutes. Narrate what the search returned in plain English before proceeding. This is the most important step: you are looking at what is actually happening right now, not just what happened before.
 
 STEP 3 - MAP: Call get_service_dependency_graph for the affected service. Identify upstream dependencies that could be causing this and downstream dependents at risk.
 
@@ -50,7 +50,7 @@ export interface AgentBuilderConfig {
 export function buildSentinelAgentConfig(toolExecutionBaseUrl: string): AgentBuilderConfig {
   return {
     displayName: "Sentinel",
-    description: "Splunk-native incident response agent with KV Store memory, live SPL investigation, and safe remediation tools.",
+    description: "Splunk-native incident response agent with KV Store memory, bounded live investigation, and safe remediation tools.",
     defaultLanguageCode: "en",
     timeZone: "UTC",
     model: "splunk-hosted-models-or-gemini-fallback",
