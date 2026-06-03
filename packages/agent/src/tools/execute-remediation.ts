@@ -15,6 +15,10 @@ type ServiceExecutionConfig = {
   cloudRunServiceName: string | null;
 };
 
+function isLocalAdminHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
 function parameterString(parameters: Record<string, string | number>, key: string): string | undefined {
   const value = parameters[key];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
@@ -86,6 +90,33 @@ async function serviceConfig(targetService: string, orgId?: string): Promise<Ser
   };
 }
 
+function allowedAdminOrigins(): Set<string> {
+  return new Set(
+    (getAgentEnv().SENTINEL_ADMIN_REMEDIATION_ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((value) => value.trim().replace(/\/+$/, ""))
+      .filter((value) => value.length > 0)
+  );
+}
+
+function validateAdminBaseUrl(raw: string, serviceName: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`service_runtime_configs.${serviceName}.adminBaseUrl must be a valid URL`);
+  }
+  const localDevelopment = canUseLocalVerificationEffect() && isLocalAdminHost(url.hostname);
+  if (url.protocol !== "https:" && !localDevelopment) {
+    throw new Error(`service_runtime_configs.${serviceName}.adminBaseUrl must use HTTPS`);
+  }
+  const allowed = allowedAdminOrigins();
+  if (allowed.size > 0 && !allowed.has(url.origin.replace(/\/+$/, ""))) {
+    throw new Error(`service_runtime_configs.${serviceName}.adminBaseUrl origin is not allowlisted`);
+  }
+  return url;
+}
+
 function validateConfigForAction(action: RemediationAction, config: ServiceExecutionConfig): void {
   const backend = remediationBackend();
   if (backend === "cloud-run" && (action === "scale_service" || action === "restart_pod") && !config.cloudRunServiceName) {
@@ -99,6 +130,7 @@ function validateConfigForAction(action: RemediationAction, config: ServiceExecu
     if (!config.adminBaseUrl) {
       throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
     }
+    validateAdminBaseUrl(config.adminBaseUrl, config.name);
   }
   if (action === "notify_team" && isLocalVerifyMode()) return;
   if (action === "notify_team" && !config.incidentChannel) {
@@ -283,17 +315,18 @@ async function dispatchAdminEndpoint(
     throw new Error(`service_runtime_configs.${config.name}.adminBaseUrl is required for ${action}`);
   }
   const env = getAgentEnv();
-  const secret = env.AGENT_TOOL_SECRET ?? env.WEBHOOK_SECRET;
+  const secret = env.SENTINEL_ADMIN_REMEDIATION_SECRET;
   if (!secret) {
-    throw new Error("AGENT_TOOL_SECRET or WEBHOOK_SECRET is required when SENTINEL_REMEDIATION_BACKEND=admin-endpoint");
+    throw new Error("SENTINEL_ADMIN_REMEDIATION_SECRET is required when SENTINEL_REMEDIATION_BACKEND=admin-endpoint");
   }
-  const endpoint = `${config.adminBaseUrl.replace(/\/+$/, "")}/admin/remediation`;
+  const baseUrl = validateAdminBaseUrl(config.adminBaseUrl, config.name);
+  const endpoint = new URL("/admin/remediation", baseUrl).toString();
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${secret}`,
       "Content-Type": "application/json",
-      "x-sentinel-tool-secret": secret
+      "x-sentinel-remediation-secret": secret
     },
     body: JSON.stringify({
       action,

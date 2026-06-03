@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
 import { loadRootEnv } from "@sentinel/shared";
@@ -6,6 +7,8 @@ loadRootEnv();
 
 const port = Number.parseInt(process.env.SPLUNK_TUNNEL_GATEWAY_PORT ?? "19089", 10);
 const gatewayToken = process.env.SPLUNK_GATEWAY_TOKEN?.trim();
+const configuredMaxBodyBytes = Number.parseInt(process.env.SPLUNK_GATEWAY_MAX_BODY_BYTES ?? String(10 * 1024 * 1024), 10);
+const maxBodyBytes = Number.isFinite(configuredMaxBodyBytes) && configuredMaxBodyBytes > 0 ? configuredMaxBodyBytes : 10 * 1024 * 1024;
 
 function splunkTarget(path: string): { port: number; name: "hec" | "management" } {
   return path.startsWith("/services/collector") ? { port: 8088, name: "hec" } : { port: 8089, name: "management" };
@@ -30,17 +33,31 @@ function forwardHeaders(headers: IncomingHttpHeaders): Record<string, string | s
   return forwarded;
 }
 
+function payloadTooLargeError(): Error {
+  const error = new Error("Splunk tunnel request body is too large");
+  error.name = "PayloadTooLarge";
+  return error;
+}
+
 async function readRequestBody(req: http.IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > maxBodyBytes) throw payloadTooLargeError();
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks);
 }
 
 function authorized(req: http.IncomingMessage): boolean {
-  if (!gatewayToken) return true;
-  return req.headers["x-sentinel-splunk-gateway-token"] === gatewayToken;
+  if (!gatewayToken) return false;
+  const supplied = req.headers["x-sentinel-splunk-gateway-token"];
+  if (typeof supplied !== "string") return false;
+  const expectedBuffer = Buffer.from(gatewayToken);
+  const suppliedBuffer = Buffer.from(supplied);
+  return expectedBuffer.length === suppliedBuffer.length && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -56,36 +73,42 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const path = req.url ?? "/";
-  const target = splunkTarget(path);
-  const body = await readRequestBody(req);
-  const headers = {
-    ...forwardHeaders(req.headers),
-    ...(body.length > 0 ? { "content-length": String(body.length) } : {})
-  };
+  try {
+    const path = req.url ?? "/";
+    const target = splunkTarget(path);
+    const body = await readRequestBody(req);
+    const headers = {
+      ...forwardHeaders(req.headers),
+      ...(body.length > 0 ? { "content-length": String(body.length) } : {})
+    };
 
-  const proxyReq = https.request(
-    {
-      hostname: "localhost",
-      port: target.port,
-      method: req.method,
-      path,
-      headers,
-      rejectUnauthorized: false
-    },
-    (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-      proxyRes.pipe(res);
-    }
-  );
+    const proxyReq = https.request(
+      {
+        hostname: "localhost",
+        port: target.port,
+        method: req.method,
+        path,
+        headers,
+        rejectUnauthorized: false
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
 
-  proxyReq.on("error", (error) => {
-    res.writeHead(502, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: `Splunk ${target.name} proxy failed`, message: error.message }));
-  });
+    proxyReq.on("error", (error) => {
+      res.writeHead(502, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `Splunk ${target.name} proxy failed`, message: error.message }));
+    });
 
-  if (body.length > 0) proxyReq.write(body);
-  proxyReq.end();
+    if (body.length > 0) proxyReq.write(body);
+    proxyReq.end();
+  } catch (error) {
+    const status = error instanceof Error && error.name === "PayloadTooLarge" ? 413 : 500;
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: status === 413 ? "Splunk tunnel request body too large" : "Splunk tunnel request failed" }));
+  }
 });
 
 server.listen(port, "127.0.0.1", () => {

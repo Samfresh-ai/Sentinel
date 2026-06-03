@@ -15,6 +15,7 @@ const DEFAULT_API_URL = "https://sentinel-api-n8ly.onrender.com";
 const CRON_SCHEDULE = "* * * * *";
 const ARTIFACT_DIR = "artifacts/runtime";
 const API_REQUEST_TIMEOUT_MS = 20_000;
+const PROJECT_LOG_SOURCETYPE = "sentinel:project-app-log";
 
 const savedSearchSchema = z
   .object({
@@ -67,6 +68,19 @@ function randomSuffix(): string {
 
 function quoteSplunk(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+}
+
+function sentinelSplunkIndex(): string {
+  return (process.env.SPLUNK_INDEX ?? "sentinel").trim() || "sentinel";
+}
+
+function projectLogSearchFilter(input: { orgId: string; projectId: string }): string {
+  return [
+    `index="${quoteSplunk(sentinelSplunkIndex())}"`,
+    `sourcetype="${PROJECT_LOG_SOURCETYPE}"`,
+    `orgId="${quoteSplunk(input.orgId)}"`,
+    `sentinelProjectId="${quoteSplunk(input.projectId)}"`
+  ].join(" ");
 }
 
 function redactWebhook(value: string): string {
@@ -282,7 +296,7 @@ async function disableSavedSearch(name: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-async function sendProjectLogs(projectId: string): Promise<number> {
+async function sendProjectLogs(orgId: string, projectId: string): Promise<number> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const events = Array.from({ length: 96 }, (_item, index) => {
     const failure = index < 42;
@@ -313,12 +327,13 @@ async function sendProjectLogs(projectId: string): Promise<number> {
           "    at async CheckoutController.confirm (/srv/app/src/checkout/controller.ts:77:9)"
         ].join("\\n");
     return {
-      index: "prod",
-      sourcetype: "app",
+      index: sentinelSplunkIndex(),
+      sourcetype: PROJECT_LOG_SOURCETYPE,
       source: "sentinel-human-flow",
       host: `checkout-${(index % 3) + 1}`,
       time: nowSeconds - Math.max(0, 75 - index),
       event: {
+        orgId,
         sentinelProjectId: projectId,
         level: failure ? "error" : "info",
         service: "payment",
@@ -351,8 +366,8 @@ async function sendProjectLogs(projectId: string): Promise<number> {
   return events.length;
 }
 
-async function waitForIndexedLogs(projectId: string): Promise<{ total: number; econnreset: number }> {
-  const spl = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" | stats count as total count(eval(error_type="ECONNRESET")) as econnreset`;
+async function waitForIndexedLogs(orgId: string, projectId: string): Promise<{ total: number; econnreset: number }> {
+  const spl = `${projectLogSearchFilter({ orgId, projectId })} | stats count as total count(eval(error_type="ECONNRESET")) as econnreset`;
   for (let attempt = 1; attempt <= 24; attempt += 1) {
     const row = (await runSearch(spl, { maxResults: 1 }))[0] ?? {};
     const total = Number(row.total ?? 0);
@@ -450,7 +465,7 @@ async function main(): Promise<void> {
     proof.webhookUrl = redactWebhook(org.webhookUrl);
 
     await seedHumanProject({ orgId: org.orgId, apiUrl });
-    const search = `index=prod sourcetype=app sentinelProjectId="${quoteSplunk(projectId)}" service=payment error_type=ECONNRESET | stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype values(message) as _raw values(root_signal) as root_signal max(redis_pool_waiting) as redis_pool_waiting max(latency_ms) as latency_ms by sentinelProjectId | where error_count >= 30 | eval service="payment-service", severity="P1"`;
+    const search = `${projectLogSearchFilter({ orgId: org.orgId, projectId })} (service=payment OR service="payment-service") error_type=ECONNRESET | stats count as error_count values(host) as host values(source) as source values(sourcetype) as sourcetype values(message) as _raw values(root_signal) as root_signal max(redis_pool_waiting) as redis_pool_waiting max(latency_ms) as latency_ms by sentinelProjectId | where error_count >= 30 | eval service="payment-service", severity="P1"`;
     await configureSavedSearch({ name: savedSearchName, search, webhookUrl: org.webhookUrl });
     writeLine(`PASS Splunk saved search configured name=${savedSearchName}`);
     proof.savedSearch = {
@@ -460,8 +475,8 @@ async function main(): Promise<void> {
       hardSignals: ["ECONNRESET spike", "Redis pool exhaustion", "checkout 503", "worker timeout", "queue backlog", "degraded dependency", "stack-only Redis fingerprint"]
     };
 
-    const logsSent = await sendProjectLogs(projectId);
-    const indexedCounts = await waitForIndexedLogs(projectId);
+    const logsSent = await sendProjectLogs(org.orgId, projectId);
+    const indexedCounts = await waitForIndexedLogs(org.orgId, projectId);
     proof.logsSentToSplunk = logsSent;
     proof.indexedCounts = indexedCounts;
     (proof.acceptance as Record<string, boolean>).appToSplunkLogs = true;

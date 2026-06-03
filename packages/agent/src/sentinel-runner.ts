@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { z } from "zod";
 import { agentEventSchema, type AgentEvent, type AgentStepType, type NormalizedAlert, normalizedAlertSchema } from "@sentinel/shared";
 import { assertProductionSafeRuntime, canUseLocalVerificationEffect } from "@sentinel/shared";
@@ -146,22 +147,6 @@ function actionFromCommand(command: string | null): "scale_service" | "restart_p
     return command;
   }
   return null;
-}
-
-function splunkSearchForAlert(alert: NormalizedAlert): string {
-  const symptomText = alert.symptoms.join(" ").toLowerCase();
-  if (alert.incidentType === "sentinel_test_payment_redis_spike" || symptomText.includes("econnreset")) {
-    return "index=prod sourcetype=app service=payment | stats count by error_type";
-  }
-
-  const service = alert.affectedServices[0] ?? "*";
-  const terms = alert.symptoms
-    .flatMap((symptom) => symptom.toLowerCase().match(/[a-z0-9]+/g) ?? [])
-    .filter((term) => term.length > 3)
-    .slice(0, 8)
-    .map((term) => `"${term.replaceAll("\"", "\\\"")}"`);
-  const expression = terms.length > 0 ? terms.join(" OR ") : `"${service}"`;
-  return `search index=sentinel (${expression} OR service=${service}) | head 25`;
 }
 
 function statCount(results: Array<Record<string, unknown>>, key: string): number | null {
@@ -362,17 +347,18 @@ async function writeDeadLetter(input: {
   const errorMessage = messageFromError(input.error);
   const stackTrace = input.error instanceof Error && input.error.stack ? input.error.stack : errorMessage;
   await createCollection("dead_letter", {});
-  const existing = await getDocument<Record<string, unknown>>("dead_letter", input.incidentId).catch(() => null);
+  const key = crypto.createHash("sha256").update(`${input.orgId}:${input.incidentId}`).digest("hex");
+  const existing = await getDocument<Record<string, unknown>>("dead_letter", key, { orgId: input.orgId }).catch(() => null);
   if (existing) {
-    await updateDocument("dead_letter", input.incidentId, {
+    await updateDocument("dead_letter", key, {
       ...existing,
       errorMessage,
       stackTrace,
       lastAttempt: now
-    });
+    }, { orgId: input.orgId });
   } else {
     await insertDocument("dead_letter", {
-      _key: input.incidentId,
+      _key: key,
       orgId: input.orgId,
       incidentId: input.incidentId,
       errorMessage,
@@ -380,7 +366,7 @@ async function writeDeadLetter(input: {
       attemptCount: 0,
       lastAttempt: now,
       createdAt: now
-    });
+    }, { orgId: input.orgId });
   }
   await writeAuditEntry({
     orgId: input.orgId,
@@ -564,7 +550,6 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
     const rootCauseCandidate = rootCauseFromSignals(serviceSignals, graph);
     const originalSignal = serviceSignals.find((signal) => signal.service === (rootCauseCandidate ?? serviceName)) ?? serviceSignals[0];
     const originalErrorCount = Math.max(0, originalSignal?.errorCount ?? liveLogs.eventCount);
-    const verifySpl = originalSignal?.spl ?? splunkSearchForAlert(parsed.alert);
 
     const runbookInput = {
       incidentDescription: `${parsed.alert.title}\nRoot cause candidate: ${rootCauseCandidate ?? "unknown"}\n${parsed.alert.symptoms.join("\n")}`,
@@ -670,7 +655,15 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
         await updateSentinelIncident(parsed.incidentId, parsed.orgId, { remediationAttempts, verifyResults });
       } else {
         const verifyFrom = splunkEpochSeconds(result.executedAt, 5_000);
-        const verifyInput = { spl: verifySpl, timeRange: { earliest: verifyFrom, latest: "now" }, action, originalErrorCount, remediationAttempts: remediationAttempts + 1 };
+        const verifyServices = uniqueValues([targetService, rootCauseCandidate ?? serviceName, ...parsed.alert.affectedServices]).slice(0, 5);
+        const verifyInput = {
+          services: verifyServices,
+          symptoms: parsed.alert.symptoms,
+          timeRange: { earliest: verifyFrom, latest: "now" },
+          action,
+          originalErrorCount,
+          remediationAttempts: remediationAttempts + 1
+        };
         const verifyResult = await auditedPhase(
           {
             orgId: parsed.orgId,
@@ -691,13 +684,15 @@ export async function runSentinelAgent(input: unknown, sink?: SentinelEventSink)
             }
             toolsCalled.push("query_splunk_logs");
             const latest = await querySplunkLogs({
-              spl: verifySpl,
+              services: verifyServices,
+              symptoms: parsed.alert.symptoms,
               timeRange: { earliest: verifyFrom, latest: "now" },
               description: `Verifying whether ${targetService} cleared after ${action}.`
             });
             remediationAttempts += 1;
+            const latestSignal = latest.serviceSignals?.find((signal) => signal.service === targetService) ?? latest.serviceSignals?.[0];
             const currentCount = adjustedVerifyCount({
-              actualCount: errorCountFromResults(latest.results),
+              actualCount: latestSignal?.errorCount ?? errorCountFromResults(latest.results),
               originalCount: originalErrorCount,
               action,
               attempt: remediationAttempts,

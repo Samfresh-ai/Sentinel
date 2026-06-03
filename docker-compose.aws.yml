@@ -16,7 +16,6 @@ services:
       - ./deploy/aws/splunk-default.yml:/tmp/defaults/default.yml:ro
     ports:
       - "8000:8000"
-      - "8088:8088"
     healthcheck:
       test: ["CMD-SHELL", "curl -sk -u admin:$${SPLUNK_PASSWORD} https://localhost:8089/services/server/info?output_mode=json >/dev/null || exit 1"]
       interval: 15s
@@ -39,17 +38,18 @@ services:
       PORT: 3001
       SPLUNK_HOST: splunk
       SPLUNK_MGMT_URL: ${SPLUNK_MGMT_URL:-https://splunk:8089}
-      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-http://splunk:8088/services/collector/event}
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-https://splunk:8088/services/collector/event}
       SPLUNK_USERNAME: ${SPLUNK_USERNAME:-admin}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?Set SPLUNK_PASSWORD in .env.aws}
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?Set SPLUNK_HEC_TOKEN in .env.aws}
-      SPLUNK_TLS_REJECT_UNAUTHORIZED: ${SPLUNK_TLS_REJECT_UNAUTHORIZED:-false}
-      SPLUNK_GATEWAY_TOKEN: ""
+      SPLUNK_TLS_REJECT_UNAUTHORIZED: ${SPLUNK_TLS_REJECT_UNAUTHORIZED:-true}
+      SPLUNK_GATEWAY_TOKEN: ${SPLUNK_GATEWAY_TOKEN:-}
       SPLUNK_CF_ACCESS_CLIENT_ID: ""
       SPLUNK_CF_ACCESS_CLIENT_SECRET: ""
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.aws}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?Set WEBHOOK_SECRET in .env.aws}
       AGENT_TOOL_SECRET: ${AGENT_TOOL_SECRET:?Set AGENT_TOOL_SECRET in .env.aws}
+      SENTINEL_ADMIN_REMEDIATION_SECRET: ${SENTINEL_ADMIN_REMEDIATION_SECRET:?Set SENTINEL_ADMIN_REMEDIATION_SECRET in .env.aws}
     ports:
       - "3001:3001"
     depends_on:

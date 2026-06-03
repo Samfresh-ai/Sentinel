@@ -84,6 +84,16 @@ function shouldRejectUnauthorized(config: SplunkConfig, endpoint: { host: string
   return config.SPLUNK_TLS_REJECT_UNAUTHORIZED;
 }
 
+function assertSecureEndpoint(config: SplunkConfig, endpoint: { protocol: "http:" | "https:"; host: string }, purpose: string): void {
+  if (isLocalHost(endpoint.host)) return;
+  if (endpoint.protocol !== "https:") {
+    throw new Error(`${purpose} must use HTTPS for non-local Splunk endpoint ${endpoint.host}`);
+  }
+  if (!config.SPLUNK_TLS_REJECT_UNAUTHORIZED) {
+    throw new Error(`${purpose} cannot disable TLS certificate validation for non-local Splunk endpoint ${endpoint.host}`);
+  }
+}
+
 function warnTlsChoice(config: SplunkConfig, endpoint: { host: string }): void {
   if (shouldAllowSelfSigned(endpoint) && !warnedSelfSigned) {
     logger.warn({ host: endpoint.host }, "Splunk local self-signed certificate validation is disabled for localhost only");
@@ -228,7 +238,6 @@ async function requestRaw(input: {
   body?: string;
   rejectUnauthorized?: boolean;
   ca?: string[];
-  allowCertificateHostnameMismatch?: boolean;
 }): Promise<string> {
   const transport = input.protocol === "https:" ? https : http;
   const body = input.body;
@@ -246,8 +255,7 @@ async function requestRaw(input: {
         path: input.path,
         headers,
         rejectUnauthorized: input.protocol === "https:" ? input.rejectUnauthorized : undefined,
-        ...(input.protocol === "https:" && input.ca ? { ca: input.ca } : {}),
-        ...(input.protocol === "https:" && input.allowCertificateHostnameMismatch ? { checkServerIdentity: () => undefined } : {})
+        ...(input.protocol === "https:" && input.ca ? { ca: input.ca } : {})
       },
       async (response) => {
         const text = await readResponseBody(response);
@@ -282,6 +290,7 @@ export async function splunkRestRequest<T>(
 ): Promise<T> {
   const config = getSplunkConfig();
   const endpoint = managementEndpoint(config);
+  assertSecureEndpoint(config, endpoint, "Splunk management endpoint");
   const rejectUnauthorized = shouldRejectUnauthorized(config, endpoint);
   const ca = customCertificateAuthorities(config);
   warnTlsChoice(config, endpoint);
@@ -292,7 +301,6 @@ export async function splunkRestRequest<T>(
     path: `${endpoint.basePath}${pathWithParams(input.path, input.query)}`,
     rejectUnauthorized,
     ...(ca ? { ca } : {}),
-    ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
       ...accessHeaders(config),
       // SCS tokens are Splunk Cloud Platform only. Local Enterprise uses Basic Auth.
@@ -311,6 +319,7 @@ export async function splunkRestRequest<T>(
 export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown): Promise<T> {
   const config = getSplunkConfig();
   const endpoint = hecEndpoint(config);
+  assertSecureEndpoint(config, endpoint, "Splunk HEC endpoint");
   const rejectUnauthorized = shouldRejectUnauthorized(config, endpoint);
   const ca = customCertificateAuthorities(config);
   warnTlsChoice(config, endpoint);
@@ -321,7 +330,6 @@ export async function splunkHecRequest<T>(schema: z.ZodType<T>, payload: unknown
     body: JSON.stringify(payload),
     rejectUnauthorized,
     ...(ca ? { ca } : {}),
-    ...(ca ? { allowCertificateHostnameMismatch: true } : {}),
     headers: {
       ...accessHeaders(config),
       Authorization: `Splunk ${config.SPLUNK_HEC_TOKEN}`,

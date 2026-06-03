@@ -2,7 +2,7 @@
 splunk:
   hec:
     enable: true
-    ssl: false
+    ssl: true
     port: 8088
   conf:
     - key: app
