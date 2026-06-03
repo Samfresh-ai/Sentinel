@@ -56,7 +56,7 @@ Current verified Splunk target:
 - Splunk watches those logs with a saved search and fires Sentinel's production webhook.
 - Sentinel then acts, verifies with live SPL, closes the incident, and writes the post-mortem back to Splunk.
 
-Do not point a sandbox or submission proof at an AWS Sentinel API hostname unless `/health` is proven reachable for that hostname. The verified submitted API path is Render; AWS is the verified Splunk gateway path.
+The verified submitted API path is Render; AWS is the verified Splunk gateway path.
 ---
 
 ## What happens during an incident
