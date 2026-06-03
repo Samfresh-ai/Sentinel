@@ -108,8 +108,8 @@ const openAiCompatibleChatResponseSchema = z.object({
   ).min(1)
 }).passthrough();
 
-const GENERATION_TIMEOUT_MS = Number.parseInt(process.env.SENTINEL_GENERATION_TIMEOUT_MS ?? "45000", 10);
-const GENERATION_RETRY_ATTEMPTS = Number.parseInt(process.env.SENTINEL_GENERATION_RETRY_ATTEMPTS ?? "4", 10);
+const GENERATION_TIMEOUT_MS = Number.parseInt(process.env.SENTINEL_GENERATION_TIMEOUT_MS ?? "60000", 10);
+const GENERATION_RETRY_ATTEMPTS = Number.parseInt(process.env.SENTINEL_GENERATION_RETRY_ATTEMPTS ?? "3", 10);
 
 function generationTimeoutMs(): number {
   return Number.isFinite(GENERATION_TIMEOUT_MS) && GENERATION_TIMEOUT_MS > 0 ? GENERATION_TIMEOUT_MS : 30_000;
@@ -172,7 +172,10 @@ function retryableGenerationError(error: unknown): boolean {
   const message = generationErrorMessage(error).toLowerCase();
   return (
     message.includes("timeout") ||
+    message.includes("timed out") ||
     message.includes("aborted") ||
+    message.includes("aborterror") ||
+    message.includes("econnaborted") ||
     message.includes("econnreset") ||
     message.includes("socket") ||
     message.includes("openai-compatible generation failed with 408") ||
@@ -254,7 +257,7 @@ async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
           { role: "user", content: prompt }
         ],
         temperature: 0.2,
-        max_tokens: 900
+        max_tokens: 500
       }),
       signal: controller.signal
     });
