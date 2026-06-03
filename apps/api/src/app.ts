@@ -114,6 +114,30 @@ function healthErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function firstNonEmptyEnv(keys: string[], fallback = "unknown"): string {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return fallback;
+}
+
+function publicRuntimeVersion(): Record<string, unknown> {
+  const readiness = runtimeReadiness();
+  const splunkGateway = readiness.violations.some((violation) => violation.includes("SPLUNK_")) ? "degraded" : "ok";
+  const autonomousReady = readiness.mode === "autonomous-ready";
+  return {
+    status: autonomousReady ? "ok" : "degraded",
+    service: "sentinel-api",
+    gitSha: firstNonEmptyEnv(["GIT_SHA", "SENTINEL_GIT_SHA", "RENDER_GIT_COMMIT", "COMMIT_SHA"]),
+    buildTime: firstNonEmptyEnv(["BUILD_TIME", "SENTINEL_BUILD_TIME", "RENDER_BUILD_TIMESTAMP"]),
+    environment: readiness.production ? "production" : process.env.NODE_ENV ?? "development",
+    splunkGateway,
+    autonomousReady,
+    runtime: readiness
+  };
+}
+
 function configuredCorsOrigins(): Set<string> {
   const values = [
     process.env.PUBLIC_APP_URL,
@@ -1217,6 +1241,20 @@ export function createApp(): express.Express {
     "/runtime/readiness",
     asyncHandler(async (_req, res) => {
       res.json(runtimeReadiness());
+    })
+  );
+
+  app.get(
+    "/readiness",
+    asyncHandler(async (_req, res) => {
+      res.json(publicRuntimeVersion());
+    })
+  );
+
+  app.get(
+    "/__version",
+    asyncHandler(async (_req, res) => {
+      res.json(publicRuntimeVersion());
     })
   );
 

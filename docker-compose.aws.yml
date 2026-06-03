@@ -30,6 +30,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL in .env.aws}
         NEXT_PUBLIC_SPLUNK_DASHBOARD_URL: ${NEXT_PUBLIC_SPLUNK_DASHBOARD_URL:?Set NEXT_PUBLIC_SPLUNK_DASHBOARD_URL in .env.aws}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     restart: unless-stopped
     env_file:
       - .env.aws
@@ -50,8 +52,12 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?Set WEBHOOK_SECRET in .env.aws}
       AGENT_TOOL_SECRET: ${AGENT_TOOL_SECRET:?Set AGENT_TOOL_SECRET in .env.aws}
       SENTINEL_ADMIN_REMEDIATION_SECRET: ${SENTINEL_ADMIN_REMEDIATION_SECRET:?Set SENTINEL_ADMIN_REMEDIATION_SECRET in .env.aws}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      SENTINEL_GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_TIME: ${BUILD_TIME:-unknown}
+      SENTINEL_BUILD_TIME: ${BUILD_TIME:-unknown}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3002:3001"
     depends_on:
       splunk:
         condition: service_healthy

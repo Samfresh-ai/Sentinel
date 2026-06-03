@@ -38,25 +38,23 @@ The second incident reused the memory created by the first run. Confidence moved
 
 ## Live deployment
 
-Current Render deployment:
+Current judge-ready AWS deployment:
 
-- App: `https://sentinel-api-n8ly.onrender.com/`
-- API: `https://sentinel-api-n8ly.onrender.com`
-- Health: `https://sentinel-api-n8ly.onrender.com/health`
-- Runtime readiness: `https://sentinel-api-n8ly.onrender.com/runtime/readiness`
-- Agent OpenAPI: `https://sentinel-api-n8ly.onrender.com/agent/openapi.json`
+- App/API: `https://sentinel-api.3.208.71.125.sslip.io`
+- Runtime readiness: `https://sentinel-api.3.208.71.125.sslip.io/readiness`
+- Version proof: `https://sentinel-api.3.208.71.125.sslip.io/__version`
+- Agent OpenAPI: `https://sentinel-api.3.208.71.125.sslip.io/agent/openapi.json`
+- Splunk gateway health: `https://sentinel-gw.3.208.71.125.sslip.io/__sentinel_proxy_health`
 - Submission video: `https://youtu.be/GXZ_88BCrsI`
 
-The current Render service serves the web app and API from the same host. The deployment config keeps `PUBLIC_APP_URL`, `API_PUBLIC_URL`, and `NEXT_PUBLIC_API_URL` separate so the web and API can split cleanly later.
+The AWS service serves the web app and API from the same TLS host. Raw container ports stay bound to localhost behind Caddy.
 
 Current verified Splunk target:
 
 - Splunk Enterprise is running on AWS behind a protected gateway.
-- Render sends Sentinel logs to that AWS Splunk HEC target.
+- Sentinel sends logs to that AWS Splunk HEC target.
 - Splunk watches those logs with a saved search and fires Sentinel's production webhook.
 - Sentinel then acts, verifies with live SPL, closes the incident, and writes the post-mortem back to Splunk.
-
-The verified submitted API path is Render; AWS is the verified Splunk gateway path.
 ---
 
 ## What happens during an incident
@@ -239,14 +237,15 @@ Each organisation gets an isolated brain. Every incident, runbook, post-mortem, 
 
 ## Production deployment
 
-Sentinel blocks startup if unsafe settings are present in production — offline generation, local-only verification, localhost URLs, or missing Splunk credentials cause a hard exit with a clear error message. Check `/runtime/readiness` to confirm production status before going live.
+Sentinel blocks startup if unsafe settings are present in production — offline generation, local-only verification, localhost URLs, or missing Splunk credentials cause a hard exit with a clear error message. Check `/readiness` or `/__version` to confirm production status and deployed commit before judging.
 
 Current public links:
 
-- `PUBLIC_APP_URL`: `https://sentinel-api-n8ly.onrender.com/`
-- `API_PUBLIC_URL`: `https://sentinel-api-n8ly.onrender.com`
-- `NEXT_PUBLIC_API_URL`: `https://sentinel-api-n8ly.onrender.com`
-- `AGENT_TOOL_EXECUTION_BASE_URL`: `https://sentinel-api-n8ly.onrender.com`
+- `PUBLIC_APP_URL`: `https://sentinel-api.3.208.71.125.sslip.io`
+- `API_PUBLIC_URL`: `https://sentinel-api.3.208.71.125.sslip.io`
+- `NEXT_PUBLIC_API_URL`: `https://sentinel-api.3.208.71.125.sslip.io`
+- `AGENT_TOOL_EXECUTION_BASE_URL`: `https://sentinel-api.3.208.71.125.sslip.io`
+- `SPLUNK_GATEWAY_HEALTH`: `https://sentinel-gw.3.208.71.125.sslip.io/__sentinel_proxy_health`
 
 Required production environment variables:
 ```env

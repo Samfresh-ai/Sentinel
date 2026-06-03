@@ -108,8 +108,8 @@ const openAiCompatibleChatResponseSchema = z.object({
   ).min(1)
 }).passthrough();
 
-const GENERATION_TIMEOUT_MS = Number.parseInt(process.env.SENTINEL_GENERATION_TIMEOUT_MS ?? "30000", 10);
-const GENERATION_RETRY_ATTEMPTS = Number.parseInt(process.env.SENTINEL_GENERATION_RETRY_ATTEMPTS ?? "3", 10);
+const GENERATION_TIMEOUT_MS = Number.parseInt(process.env.SENTINEL_GENERATION_TIMEOUT_MS ?? "45000", 10);
+const GENERATION_RETRY_ATTEMPTS = Number.parseInt(process.env.SENTINEL_GENERATION_RETRY_ATTEMPTS ?? "4", 10);
 
 function generationTimeoutMs(): number {
   return Number.isFinite(GENERATION_TIMEOUT_MS) && GENERATION_TIMEOUT_MS > 0 ? GENERATION_TIMEOUT_MS : 30_000;
@@ -125,6 +125,47 @@ function generationRetryAttempts(): number {
 
 function generationErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]`;
+}
+
+function safeProviderBody(value: string): string {
+  const redacted = value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer [REDACTED]")
+    .replace(/sk-[A-Za-z0-9_-]+/g, "sk-[REDACTED]")
+    .replace(/"api[_-]?key"\s*:\s*"[^"]+"/gi, "\"apiKey\":\"[REDACTED]\"");
+  return truncateText(redacted, 500);
+}
+
+function compactJsonValue(value: unknown, maxLength = 4_000): unknown {
+  const text = JSON.stringify(value);
+  if (!text || text.length <= maxLength) return value;
+  return {
+    truncated: true,
+    originalBytes: Buffer.byteLength(text),
+    preview: truncateText(text, maxLength)
+  };
+}
+
+function compactTimeline(timeline: Array<{ timestamp: string; event: string; actor: "sentinel" | "sentinel" | "human" }>) {
+  const normalized = timeline.map((item) => ({
+    timestamp: truncateText(item.timestamp, 80),
+    actor: item.actor,
+    event: truncateText(item.event, 500)
+  }));
+  if (normalized.length <= 14) return normalized;
+  return [
+    ...normalized.slice(0, 4),
+    {
+      timestamp: "",
+      actor: "sentinel" as const,
+      event: `Timeline truncated: ${normalized.length - 12} middle events omitted from model prompt.`
+    },
+    ...normalized.slice(-8)
+  ];
 }
 
 function retryableGenerationError(error: unknown): boolean {
@@ -205,7 +246,13 @@ async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
       },
       body: JSON.stringify({
         model: config.model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "system",
+            content: "Return only valid JSON. Do not include markdown fences, prose, secrets, credentials, or unrelated commentary."
+          },
+          { role: "user", content: prompt }
+        ],
         temperature: 0.2,
         max_tokens: 900
       }),
@@ -221,9 +268,15 @@ async function generateOpenAiCompatibleText(prompt: string): Promise<string> {
   }
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`OpenAI-compatible generation failed with ${response.status}: ${body.slice(0, 1_000)}`);
+    throw new Error(`OpenAI-compatible generation failed with ${response.status}: ${safeProviderBody(body)}`);
   }
-  const parsed = openAiCompatibleChatResponseSchema.parse(JSON.parse(body));
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(body);
+  } catch {
+    throw new Error(`OpenAI-compatible generation returned invalid response JSON: ${safeProviderBody(body)}`);
+  }
+  const parsed = openAiCompatibleChatResponseSchema.parse(parsedBody);
   const text = parsed.choices[0]?.message.content;
   if (!text) {
     throw new Error("OpenAI-compatible generation returned an empty message");
@@ -235,18 +288,20 @@ async function generateJsonText(prompt: string): Promise<string> {
   const env = getAgentEnv();
   const provider = generationProvider(env);
   if (HOSTED_MODELS_AVAILABLE) {
-    return generateWithHostedModels(prompt);
+    return withGenerationRetry(() => generateWithHostedModels(prompt));
   }
 
   if (provider === "nvidia" || provider === "openai-compatible") {
     return withGenerationRetry(() => generateOpenAiCompatibleText(prompt));
   }
 
-  const response = await getAiClient().models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [{ role: "user", parts: [{ text: prompt }] }]
+  return withGenerationRetry(async () => {
+    const response = await getAiClient().models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+    });
+    return response.text ?? "";
   });
-  return response.text ?? "";
 }
 
 export async function generatePostmortemFields(input: {
@@ -270,11 +325,18 @@ export async function generatePostmortemFields(input: {
     });
   }
 
+  const promptInput = {
+    title: truncateText(input.title, 240),
+    timeline: compactTimeline(input.timeline),
+    rootCause: truncateText(input.rootCause, 1_200),
+    remediationTaken: input.remediationTaken.slice(-8).map((item) => truncateText(item, 900)),
+    lessonLearned: truncateText(input.lessonLearned, 900)
+  };
   const prompt = [
     "Generate a concise structured SRE post-mortem JSON object.",
     "Return only JSON with keys summary, contributingFactors, preventionActions.",
     "Do not use generic filler. Make each field specific to the incident data.",
-    JSON.stringify(input)
+    JSON.stringify(promptInput)
   ].join("\n");
   const text = await generateJsonText(prompt);
   return postmortemGeneratedFieldsSchema.parse(normalizePostmortemGeneratedFields(extractJson(text)));
@@ -359,11 +421,18 @@ export async function generateIncidentConclusion(input: {
     });
   }
 
+  const promptInput = {
+    alertTitle: truncateText(input.alertTitle, 240),
+    symptoms: input.symptoms.slice(0, 12).map((item) => truncateText(item, 400)),
+    similarIncidents: compactJsonValue(input.similarIncidents),
+    dependencyGraph: compactJsonValue(input.dependencyGraph),
+    remediationResults: compactJsonValue(input.remediationResults)
+  };
   const prompt = [
     "Infer the most specific likely root cause and one concrete lesson learned for this incident.",
     "Return only JSON with keys rootCause and lessonLearned.",
     "Base the answer on the alert, similar incidents, dependency graph, and remediation results.",
-    JSON.stringify(input)
+    JSON.stringify(promptInput)
   ].join("\n");
   const text = await generateJsonText(prompt);
   return incidentConclusionSchema.parse(extractJson(text));

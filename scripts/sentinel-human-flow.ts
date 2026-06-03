@@ -11,7 +11,7 @@ import {
   waitForSplunkReady
 } from "@sentinel/splunk-brain";
 
-const DEFAULT_API_URL = "https://sentinel-api-n8ly.onrender.com";
+const DEFAULT_API_URL = "https://sentinel-api.3.208.71.125.sslip.io";
 const CRON_SCHEDULE = "* * * * *";
 const ARTIFACT_DIR = "artifacts/runtime";
 const API_REQUEST_TIMEOUT_MS = 20_000;

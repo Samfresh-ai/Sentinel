@@ -31,7 +31,13 @@ RUN mkdir -p /out/web/apps/web/.next \
   && cp -R apps/web/public /out/web/apps/web/public
 
 FROM node:22-slim AS runner
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
 ENV NODE_ENV=production
+ENV GIT_SHA=${GIT_SHA}
+ENV SENTINEL_GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+ENV SENTINEL_BUILD_TIME=${BUILD_TIME}
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
